@@ -9,7 +9,10 @@ import type {
   ThreadId,
   TurnId,
 } from "@t3tools/contracts";
-import { formatInlineQuickActionOutput } from "@t3tools/client-runtime/state/terminal";
+import {
+  formatInlineQuickActionOutput,
+  readInlineQuickActionCompletion,
+} from "@t3tools/client-runtime/state/terminal";
 import { CHAT_LIST_ANCHOR_OFFSET, resolveChatListAnchoredEndSpace } from "@t3tools/shared/chatList";
 import { formatElapsed } from "@t3tools/shared/orchestrationTiming";
 import { SymbolView } from "../../components/AppSymbol";
@@ -375,38 +378,22 @@ function MarkdownCodeBlock(props: {
         ? null
         : { threadId: props.threadId, terminalId: execution.terminalId },
   });
-  const [status, setStatus] = useState<"running" | "finished" | "error">("running");
-  const finishedRef = useRef(false);
-
-  useEffect(() => {
-    finishedRef.current = false;
-    setStatus("running");
-  }, [execution?.terminalId]);
-
-  useEffect(() => {
-    if (execution === null) return;
-    if (terminal.error !== null || terminal.status === "error") {
-      setStatus("error");
-      return;
-    }
-    if (finishedRef.current) return;
-    if (terminal.version === 0 || terminal.hasRunningSubprocess) {
-      setStatus("running");
-      return;
-    }
-
-    const timeout = setTimeout(() => {
-      finishedRef.current = true;
-      setStatus("finished");
-    }, 1_000);
-    return () => clearTimeout(timeout);
-  }, [execution, terminal.error, terminal.hasRunningSubprocess, terminal.status, terminal.version]);
+  const completion =
+    execution === null || terminal.version === 0
+      ? null
+      : readInlineQuickActionCompletion(terminal.buffer, execution.historyOffset);
+  const status: "running" | "finished" | "error" =
+    terminal.error !== null || terminal.status === "error"
+      ? "error"
+      : completion !== null || terminal.status === "exited" || terminal.status === "closed"
+        ? "finished"
+        : "running";
   const output =
     execution === null || props.quickAction === undefined || terminal.version === 0
       ? ""
       : formatInlineQuickActionOutput(terminal.buffer, execution.historyOffset, {
           command: props.quickAction.command,
-          terminalIdle: !terminal.hasRunningSubprocess,
+          terminalIdle: status === "finished",
         });
   const loading = quickActionStatus === "starting" || quickActionStatus === "running";
   let tokenOffset = 0;

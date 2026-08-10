@@ -1,10 +1,11 @@
-import type {
-  EnvironmentId,
-  TerminalAttachStreamEvent,
-  TerminalMetadataStreamEvent,
-  TerminalSessionSnapshot,
-  TerminalSummary,
-  ThreadId,
+import {
+  COMMAND_QUICK_ACTION_COMPLETION_MARKER,
+  type EnvironmentId,
+  type TerminalAttachStreamEvent,
+  type TerminalMetadataStreamEvent,
+  type TerminalSessionSnapshot,
+  type TerminalSummary,
+  type ThreadId,
 } from "@t3tools/contracts";
 
 export interface TerminalSessionState {
@@ -121,6 +122,12 @@ function trimQuickActionShellTranscript(
       if (line === commandLead || line.endsWith(` ${commandLead}`)) {
         lastEchoIndex = index;
       }
+      if (
+        line.includes(COMMAND_QUICK_ACTION_COMPLETION_MARKER) &&
+        !line.startsWith(COMMAND_QUICK_ACTION_COMPLETION_MARKER)
+      ) {
+        lastEchoIndex = index;
+      }
     }
     if (lastEchoIndex >= 0) {
       lines = lines.slice(lastEchoIndex + 1);
@@ -153,6 +160,27 @@ function trimQuickActionShellTranscript(
   return lines.join("\n");
 }
 
+function stripQuickActionCompletionMarker(output: string): string {
+  return output
+    .split("\n")
+    .filter((line) => !line.trim().startsWith(COMMAND_QUICK_ACTION_COMPLETION_MARKER))
+    .join("\n");
+}
+
+export function readInlineQuickActionCompletion(
+  buffer: string,
+  historyOffset: number,
+): { readonly exitCode: number } | null {
+  const output = normalizeInlineTerminalText(buffer, historyOffset);
+  const markerIndex = output.lastIndexOf(COMMAND_QUICK_ACTION_COMPLETION_MARKER);
+  if (markerIndex < 0) return null;
+  const exitCode = Number.parseInt(
+    output.slice(markerIndex + COMMAND_QUICK_ACTION_COMPLETION_MARKER.length),
+    10,
+  );
+  return Number.isInteger(exitCode) ? { exitCode } : null;
+}
+
 export function formatInlineTerminalOutput(
   buffer: string,
   historyOffset: number,
@@ -170,7 +198,9 @@ export function formatInlineQuickActionOutput(
     readonly maxChars?: number;
   },
 ): string {
-  const output = normalizeInlineTerminalText(buffer, historyOffset);
+  const output = stripQuickActionCompletionMarker(
+    normalizeInlineTerminalText(buffer, historyOffset),
+  );
   return boundInlineTerminalOutput(
     trimQuickActionShellTranscript(output, options.command, options.terminalIdle),
     options.maxChars ?? DEFAULT_MAX_INLINE_TERMINAL_OUTPUT_CHARS,

@@ -8,7 +8,10 @@ import {
   type TurnId,
 } from "@t3tools/contracts";
 import { parseScopedThreadKey } from "@t3tools/client-runtime/environment";
-import { formatInlineQuickActionOutput } from "@t3tools/client-runtime/state/terminal";
+import {
+  formatInlineQuickActionOutput,
+  readInlineQuickActionCompletion,
+} from "@t3tools/client-runtime/state/terminal";
 import type { AgentPanelModel } from "@t3tools/client-runtime/state/subagentRuntime";
 import {
   emptyAgentPanelModel,
@@ -1255,37 +1258,22 @@ function InlineCommandQuickActionOutput({
             terminalId: execution.terminalId,
           },
   });
-  const [status, setStatus] = useState<CommandQuickActionExecutionStatus>("running");
-  const finishedRef = useRef(false);
-
-  useEffect(() => {
-    finishedRef.current = false;
-    setStatus("running");
-  }, [execution.terminalId]);
-
-  useEffect(() => {
-    if (terminal.error !== null || terminal.status === "error") {
-      setStatus("error");
-      return;
-    }
-    if (finishedRef.current) return;
-    if (terminal.version === 0 || terminal.hasRunningSubprocess) {
-      setStatus("running");
-      return;
-    }
-
-    const timeout = setTimeout(() => {
-      finishedRef.current = true;
-      setStatus("finished");
-    }, 1_000);
-    return () => clearTimeout(timeout);
-  }, [terminal.error, terminal.hasRunningSubprocess, terminal.status, terminal.version]);
+  const completion =
+    terminal.version === 0
+      ? null
+      : readInlineQuickActionCompletion(terminal.buffer, execution.historyOffset);
+  const status: CommandQuickActionExecutionStatus =
+    terminal.error !== null || terminal.status === "error"
+      ? "error"
+      : completion !== null || terminal.status === "exited" || terminal.status === "closed"
+        ? "finished"
+        : "running";
   const output =
     terminal.version === 0
       ? ""
       : formatInlineQuickActionOutput(terminal.buffer, execution.historyOffset, {
           command: action.command,
-          terminalIdle: !terminal.hasRunningSubprocess,
+          terminalIdle: status === "finished",
         });
 
   useEffect(() => {

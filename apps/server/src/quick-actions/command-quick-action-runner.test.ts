@@ -1,5 +1,6 @@
 import { expect, it, vi } from "@effect/vitest";
 import {
+  COMMAND_QUICK_ACTION_COMPLETION_MARKER,
   DEFAULT_PROVIDER_INTERACTION_MODE,
   MessageId,
   ProjectId,
@@ -11,7 +12,6 @@ import {
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
-import * as TestClock from "effect/testing/TestClock";
 
 import * as ProjectionSnapshotQuery from "../orchestration/Services/ProjectionSnapshotQuery.ts";
 import * as TerminalManager from "../terminal/Manager.ts";
@@ -87,8 +87,10 @@ const queryLayer = Layer.succeed(ProjectionSnapshotQuery.ProjectionSnapshotQuery
 it.effect("runs the stored command exactly and exposes output only to a later message", () => {
   let history = "prompt> ";
   let hasRunningSubprocess = false;
+  let commandStarted = false;
   const write = vi.fn(({ data }: { readonly data: string }) => {
     history += `${data}ok\r\n`;
+    commandStarted = true;
     hasRunningSubprocess = true;
     return Effect.void;
   });
@@ -99,7 +101,10 @@ it.effect("runs the stored command exactly and exposes output only to a later me
     worktreePath: null,
     status: "running" as const,
     pid: 123,
-    history,
+    history:
+      commandStarted && !hasRunningSubprocess
+        ? `${history}${COMMAND_QUICK_ACTION_COMPLETION_MARKER}0\r\n`
+        : history,
     exitCode: null,
     exitSignal: null,
     label: "term-1",
@@ -127,17 +132,17 @@ it.effect("runs the stored command exactly and exposes output only to a later me
     expect(write).toHaveBeenCalledWith({
       threadId,
       terminalId: "term-1",
-      data: "printf ok\r",
+      data: `{ printf ok\n}; __t3_code_quick_action_status=$?; printf '\\n${COMMAND_QUICK_ACTION_COMPLETION_MARKER}%s\\n' "$__t3_code_quick_action_status"\r`,
     });
     expect(yield* runner.takeAvailableOutputContext(threadId)).toBeUndefined();
 
     hasRunningSubprocess = false;
-    expect(yield* runner.takeAvailableOutputContext(threadId)).toBeUndefined();
-    yield* TestClock.adjust("2 seconds");
     const context = yield* runner.takeAvailableOutputContext(threadId);
     expect(context).toContain("<terminal_context>");
     expect(context).toContain("printf ok");
     expect(context).toContain("ok");
+    expect(context).not.toContain("{ printf ok");
+    expect(context).not.toContain(COMMAND_QUICK_ACTION_COMPLETION_MARKER);
     expect(yield* runner.takeAvailableOutputContext(threadId)).toBeUndefined();
   }).pipe(Effect.provide(testLayer));
 });

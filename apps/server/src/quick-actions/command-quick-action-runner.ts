@@ -1,4 +1,5 @@
 import {
+  COMMAND_QUICK_ACTION_COMPLETION_MARKER,
   CommandQuickActionRunError,
   type CommandQuickActionRunInput,
   type CommandQuickActionRunResult,
@@ -14,12 +15,21 @@ import * as Option from "effect/Option";
 import { ProjectionSnapshotQuery } from "../orchestration/Services/ProjectionSnapshotQuery.ts";
 import { TerminalManager } from "../terminal/Manager.ts";
 
-const MIN_COMPLETION_AGE_MS = 1_500;
 const MAX_CONTEXT_CHARS = 20_000;
 const MAX_PENDING_AGE_MS = 24 * 60 * 60 * 1_000;
 
 function formatTerminalContext(label: string, output: string): string {
-  const normalized = output.replace(/\r\n/g, "\n").replace(/^\n+|\n+$/g, "");
+  let lines = output.replace(/\r\n/g, "\n").split("\n");
+  const wrapperEchoIndex = lines.findIndex(
+    (line) =>
+      line.includes(COMMAND_QUICK_ACTION_COMPLETION_MARKER) &&
+      !line.trim().startsWith(COMMAND_QUICK_ACTION_COMPLETION_MARKER),
+  );
+  if (wrapperEchoIndex >= 0) lines = lines.slice(wrapperEchoIndex + 1);
+  const normalized = lines
+    .filter((line) => !line.includes(COMMAND_QUICK_ACTION_COMPLETION_MARKER))
+    .join("\n")
+    .replace(/^\n+|\n+$/g, "");
   const bounded =
     normalized.length <= MAX_CONTEXT_CHARS
       ? normalized
@@ -29,6 +39,18 @@ function formatTerminalContext(label: string, output: string): string {
     .map((line, index) => `  ${index + 1} | ${line}`)
     .join("\n");
   return `- Quick action · ${label}:\n${body}`;
+}
+
+function hasQuickActionCompletionMarker(output: string): boolean {
+  return output
+    .replace(/\r\n/g, "\n")
+    .split("\n")
+    .some((line) => {
+      const completion = line.trim();
+      if (!completion.startsWith(COMMAND_QUICK_ACTION_COMPLETION_MARKER)) return false;
+      const exitCode = completion.slice(COMMAND_QUICK_ACTION_COMPLETION_MARKER.length);
+      return /^\d+$/.test(exitCode);
+    });
 }
 
 export class CommandQuickActionRunner extends Context.Reference<{
@@ -133,7 +155,7 @@ export const layer = Layer.effect(
         .write({
           threadId: thread.id,
           terminalId: input.terminalId,
-          data: `${action.command}\r`,
+          data: `{ ${action.command}\n}; __t3_code_quick_action_status=$?; printf '\\n${COMMAND_QUICK_ACTION_COMPLETION_MARKER}%s\\n' "$__t3_code_quick_action_status"\r`,
         })
         .pipe(
           Effect.tapError(() => Effect.sync(() => pending.delete(key))),
@@ -160,10 +182,9 @@ export const layer = Layer.effect(
           threadId: entry.threadId,
           terminalId: entry.terminalId,
         });
-        if (Option.isNone(inspected) || inspected.value.hasRunningSubprocess) continue;
-        if (now - entry.startedAtMs < MIN_COMPLETION_AGE_MS) continue;
+        if (Option.isNone(inspected)) continue;
         const output = inspected.value.snapshot.history.slice(entry.historyOffset);
-        if (output.trim().length === 0) continue;
+        if (!hasQuickActionCompletionMarker(output)) continue;
         contexts.push(formatTerminalContext(entry.label, output));
         pending.delete(key);
       }

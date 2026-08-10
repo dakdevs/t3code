@@ -1,6 +1,11 @@
 import { describe, expect, it } from "vite-plus/test";
 
-import { EnvironmentId, TerminalSessionSnapshot, ThreadId } from "@t3tools/contracts";
+import {
+  COMMAND_QUICK_ACTION_COMPLETION_MARKER,
+  EnvironmentId,
+  TerminalSessionSnapshot,
+  ThreadId,
+} from "@t3tools/contracts";
 
 import {
   applyTerminalAttachStreamEvent,
@@ -9,6 +14,7 @@ import {
   EMPTY_TERMINAL_BUFFER_STATE,
   formatInlineQuickActionOutput,
   formatInlineTerminalOutput,
+  readInlineQuickActionCompletion,
   selectRunningSubprocessTerminalIds,
 } from "./terminalSession.ts";
 
@@ -80,6 +86,25 @@ describe("terminal session reducers", () => {
     expect(formatInlineQuickActionOutput(raw, 0, { command: "git pull", terminalIdle: true })).toBe(
       "Already up to date.",
     );
+  });
+
+  it("observes exact quick-action completion and hides its shell marker", () => {
+    const raw = [
+      "{ git pull\r\n",
+      `}; status=$?; printf '${COMMAND_QUICK_ACTION_COMPLETION_MARKER}%s' "$status"\r\n`,
+      "Already up to date.\r\n",
+      `${COMMAND_QUICK_ACTION_COMPLETION_MARKER}0\r\n`,
+      "$ ",
+    ].join("");
+
+    expect(readInlineQuickActionCompletion(raw, 0)).toEqual({ exitCode: 0 });
+    expect(formatInlineQuickActionOutput(raw, 0, { command: "git pull", terminalIdle: true })).toBe(
+      "Already up to date.",
+    );
+  });
+
+  it("does not report quick-action completion before the marker arrives", () => {
+    expect(readInlineQuickActionCompletion("git pull\r\nDownloading...", 0)).toBeNull();
   });
 
   it("prefers live attach status over stale metadata after the attach stream starts", () => {

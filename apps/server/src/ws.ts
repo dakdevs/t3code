@@ -15,6 +15,8 @@ import {
   type AuthAccessStreamEvent,
   type AuthEnvironmentScope,
   AuthSessionId,
+  type CommandQuickActionRunInput,
+  type CommandQuickActionRunResult,
   CommandId,
   type DiscoveredLocalServerList,
   EventId,
@@ -487,6 +489,47 @@ const makeWsRpcLayer = (
       const serverEventId = randomUUID.pipe(Effect.map(EventId.make));
       const serverCommandId = (tag: string) =>
         randomUUID.pipe(Effect.map((uuid) => CommandId.make(`server:${tag}:${uuid}`)));
+
+      const persistCommandQuickActionExecution = (
+        input: CommandQuickActionRunInput,
+        execution: CommandQuickActionRunResult,
+      ) =>
+        Effect.gen(function* () {
+          const threadOption = yield* projectionSnapshotQuery.getThreadDetailById(input.threadId);
+          const thread = Option.getOrUndefined(threadOption);
+          const message = thread?.messages.find((entry) => entry.id === input.messageId);
+          if (message?.quickActions === undefined) return;
+          yield* orchestrationEngine.dispatch({
+            type: "thread.message.quick-actions.set",
+            commandId: yield* serverCommandId("quick-action-execution-set"),
+            threadId: input.threadId,
+            messageId: input.messageId,
+            quickActions: CommandQuickActionRunner.withCommandQuickActionExecution(
+              message.quickActions,
+              input.actionId,
+              execution,
+            ),
+            createdAt: yield* nowIso,
+          });
+        }).pipe(
+          Effect.catch((error) =>
+            Effect.logWarning("Failed to persist command quick action execution").pipe(
+              Effect.annotateLogs({
+                threadId: input.threadId,
+                messageId: input.messageId,
+                actionId: input.actionId,
+                error: String(error),
+              }),
+            ),
+          ),
+        );
+
+      const runCommandQuickAction = (input: CommandQuickActionRunInput) =>
+        Effect.gen(function* () {
+          const execution = yield* commandQuickActionRunner.run(input);
+          yield* persistCommandQuickActionExecution(input, execution);
+          return execution;
+        });
 
       const loadAuthAccessSnapshot = () =>
         Effect.all({
@@ -2055,7 +2098,7 @@ const makeWsRpcLayer = (
             "rpc.aggregate": "terminal",
           }),
         [WS_METHODS.commandQuickActionRun]: (input) =>
-          observeRpcEffect(WS_METHODS.commandQuickActionRun, commandQuickActionRunner.run(input), {
+          observeRpcEffect(WS_METHODS.commandQuickActionRun, runCommandQuickAction(input), {
             "rpc.aggregate": "terminal",
           }),
         [WS_METHODS.subscribeTerminalEvents]: (_input) =>

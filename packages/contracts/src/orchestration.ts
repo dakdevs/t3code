@@ -238,10 +238,17 @@ export type OrchestrationProject = typeof OrchestrationProject.Type;
 export const OrchestrationMessageRole = Schema.Literals(["user", "assistant", "system"]);
 export type OrchestrationMessageRole = typeof OrchestrationMessageRole.Type;
 
+export const OrchestrationQuickActionExecution = Schema.Struct({
+  terminalId: TrimmedNonEmptyString,
+  historyOffset: Schema.Int.check(Schema.isGreaterThanOrEqualTo(0)),
+});
+export type OrchestrationQuickActionExecution = typeof OrchestrationQuickActionExecution.Type;
+
 export const OrchestrationQuickAction = Schema.Struct({
   id: TrimmedNonEmptyString,
   label: TrimmedNonEmptyString,
   command: TrimmedNonEmptyString,
+  execution: Schema.optional(OrchestrationQuickActionExecution),
 });
 export type OrchestrationQuickAction = typeof OrchestrationQuickAction.Type;
 

@@ -101,7 +101,14 @@ it.layer(NodeServices.layer)("quick action decider commands", (it) => {
           commandId: CommandId.make("command-set-quick-actions"),
           threadId,
           messageId,
-          quickActions: [{ id: "code-block-1", label: "Run printf ok", command: "printf ok" }],
+          quickActions: [
+            {
+              id: "code-block-1",
+              label: "Run printf ok",
+              command: "printf ok",
+              execution: { terminalId: "term-2", historyOffset: 17 },
+            },
+          ],
           createdAt: now,
         },
       });
@@ -111,7 +118,14 @@ it.layer(NodeServices.layer)("quick action decider commands", (it) => {
         payload: {
           messageId,
           text: "",
-          quickActions: [{ id: "code-block-1", label: "Run printf ok", command: "printf ok" }],
+          quickActions: [
+            {
+              id: "code-block-1",
+              label: "Run printf ok",
+              command: "printf ok",
+              execution: { terminalId: "term-2", historyOffset: 17 },
+            },
+          ],
         },
       });
     }),

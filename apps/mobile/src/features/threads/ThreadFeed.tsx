@@ -1063,7 +1063,33 @@ const AssistantMessageMarkdown = memo(function AssistantMessageMarkdown(props: {
   const activeQuickActionIdsRef = useRef(new Set<string>());
   const [quickActionStates, setQuickActionStates] = useState<
     Record<string, MobileCommandQuickActionState>
-  >({});
+  >(() =>
+    Object.fromEntries(
+      (props.quickActions ?? []).flatMap((action) =>
+        action.execution === undefined
+          ? []
+          : [[action.id, { status: "running" as const, execution: action.execution }]],
+      ),
+    ),
+  );
+  useEffect(() => {
+    setQuickActionStates((current) => {
+      let next = current;
+      for (const action of props.quickActions ?? []) {
+        if (action.execution === undefined) continue;
+        const existing = current[action.id]?.execution;
+        if (
+          existing?.terminalId === action.execution.terminalId &&
+          existing.historyOffset === action.execution.historyOffset
+        ) {
+          continue;
+        }
+        if (next === current) next = { ...current };
+        next[action.id] = { status: "running", execution: action.execution };
+      }
+      return next;
+    });
+  }, [props.quickActions]);
   const runQuickAction = useCallback(
     (action: OrchestrationQuickAction) => {
       if (activeQuickActionIdsRef.current.has(action.id)) return;

@@ -15,7 +15,11 @@ import * as Option from "effect/Option";
 
 import * as ProjectionSnapshotQuery from "../orchestration/Services/ProjectionSnapshotQuery.ts";
 import * as TerminalManager from "../terminal/Manager.ts";
-import { CommandQuickActionRunner, layer } from "./command-quick-action-runner.ts";
+import {
+  CommandQuickActionRunner,
+  layer,
+  withCommandQuickActionExecution,
+} from "./command-quick-action-runner.ts";
 
 const now = "2026-08-09T12:00:00.000Z";
 const projectId = ProjectId.make("project-quick-action-runner");
@@ -63,6 +67,27 @@ const thread: OrchestrationThread = {
   checkpoints: [],
   session: null,
 };
+
+it("records an execution on only the matching message action", () => {
+  expect(
+    withCommandQuickActionExecution(
+      [
+        { id: "code-block-1", label: "Run first", command: "first" },
+        { id: "code-block-2", label: "Run second", command: "second" },
+      ],
+      "code-block-2",
+      { terminalId: "term-3", historyOffset: 99 },
+    ),
+  ).toEqual([
+    { id: "code-block-1", label: "Run first", command: "first" },
+    {
+      id: "code-block-2",
+      label: "Run second",
+      command: "second",
+      execution: { terminalId: "term-3", historyOffset: 99 },
+    },
+  ]);
+});
 
 const queryLayer = Layer.succeed(ProjectionSnapshotQuery.ProjectionSnapshotQuery, {
   getCommandReadModel: () => Effect.die("unused"),

@@ -1146,7 +1146,33 @@ function AssistantTimelineRow({ row }: { row: Extract<TimelineRow, { kind: "mess
   const activeQuickActionIdsRef = useRef(new Set<string>());
   const [commandQuickActionStates, setCommandQuickActionStates] = useState<
     Record<string, CommandQuickActionRenderState>
-  >({});
+  >(() =>
+    Object.fromEntries(
+      (row.message.quickActions ?? []).flatMap((action) =>
+        action.execution === undefined
+          ? []
+          : [[action.id, { status: "running" as const, execution: action.execution }]],
+      ),
+    ),
+  );
+  useEffect(() => {
+    setCommandQuickActionStates((current) => {
+      let next = current;
+      for (const action of row.message.quickActions ?? []) {
+        if (action.execution === undefined) continue;
+        const existing = current[action.id]?.execution;
+        if (
+          existing?.terminalId === action.execution.terminalId &&
+          existing.historyOffset === action.execution.historyOffset
+        ) {
+          continue;
+        }
+        if (next === current) next = { ...current };
+        next[action.id] = { status: "running", execution: action.execution };
+      }
+      return next;
+    });
+  }, [row.message.quickActions]);
   const runCommandQuickAction = useCallback(
     (action: OrchestrationQuickAction) => {
       if (activeQuickActionIdsRef.current.has(action.id)) return;

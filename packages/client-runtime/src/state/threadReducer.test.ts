@@ -410,6 +410,7 @@ describe("applyThreadDetailEvent", () => {
               id: "code-block-1",
               label: "Run git pull",
               command: "git pull --ff-only",
+              execution: { terminalId: "term-2", historyOffset: 42 },
             },
           ],
           turnId: TurnId.make("turn-quick-action"),
@@ -427,6 +428,7 @@ describe("applyThreadDetailEvent", () => {
             id: "code-block-1",
             label: "Run git pull",
             command: "git pull --ff-only",
+            execution: { terminalId: "term-2", historyOffset: 42 },
           },
         ]);
       }

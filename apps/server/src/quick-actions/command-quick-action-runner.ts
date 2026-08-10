@@ -3,6 +3,7 @@ import {
   CommandQuickActionRunError,
   type CommandQuickActionRunInput,
   type CommandQuickActionRunResult,
+  type OrchestrationQuickAction,
   type ThreadId,
 } from "@t3tools/contracts";
 import { projectScriptRuntimeEnv } from "@t3tools/shared/projectScripts";
@@ -54,6 +55,14 @@ function hasQuickActionCompletionMarker(output: string): boolean {
       const exitCode = completion.slice(COMMAND_QUICK_ACTION_COMPLETION_MARKER.length);
       return /^\d+$/.test(exitCode);
     });
+}
+
+export function withCommandQuickActionExecution(
+  quickActions: ReadonlyArray<OrchestrationQuickAction>,
+  actionId: string,
+  execution: CommandQuickActionRunResult,
+): ReadonlyArray<OrchestrationQuickAction> {
+  return quickActions.map((action) => (action.id === actionId ? { ...action, execution } : action));
 }
 
 export class CommandQuickActionRunner extends Context.Reference<{

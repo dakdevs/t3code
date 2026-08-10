@@ -257,6 +257,40 @@ describe("MessagesTimeline", () => {
     expect(markup).not.toContain('aria-label="Command quick actions"');
   });
 
+  it("restores a persisted command quick action execution from the thread message", () => {
+    const markup = renderToStaticMarkup(
+      <MessagesTimeline
+        {...buildProps()}
+        timelineEntries={[
+          {
+            id: "entry-assistant-restored-quick-action",
+            kind: "message",
+            createdAt: MESSAGE_CREATED_AT,
+            message: {
+              id: MessageId.make("assistant-restored-quick-action"),
+              role: "assistant",
+              text: "```bash\nbun test\n```",
+              quickActions: [
+                {
+                  id: "code-block-1",
+                  label: "Run bun test",
+                  command: "bun test",
+                  execution: { terminalId: "term-2", historyOffset: 42 },
+                },
+              ],
+              turnId: TurnId.make("turn-restored-quick-action"),
+              createdAt: MESSAGE_CREATED_AT,
+              updatedAt: MESSAGE_CREATED_AT,
+              streaming: false,
+            },
+          },
+        ]}
+      />,
+    );
+
+    expect(markup).toContain('aria-label="Running bun test"');
+  });
+
   it("uses the larger leading inset only when the top fade is enabled", () => {
     const timelineEntries = [buildUserTimelineEntry("Hello")];
 

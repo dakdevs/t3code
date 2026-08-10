@@ -2906,7 +2906,6 @@ function ChatViewContent(props: ChatViewProps) {
         return null;
       }
       if (result._tag === "Failure") return null;
-      storeNewTerminal(activeThreadRef, result.value.terminalId);
       return result.value;
     },
     [
@@ -2916,17 +2915,15 @@ function ChatViewContent(props: ChatViewProps) {
       environmentId,
       runCommandQuickAction,
       setThreadError,
-      storeNewTerminal,
     ],
   );
   const handleOpenCommandQuickActionTerminal = useCallback(
     (terminalId: string) => {
       if (!activeThreadRef) return;
-      storeSetActiveTerminal(activeThreadRef, terminalId);
-      setTerminalOpen(true);
+      storeEnsureTerminal(activeThreadRef, terminalId, { open: true });
       setTerminalFocusRequestId((value) => value + 1);
     },
-    [activeThreadRef, setTerminalOpen, storeSetActiveTerminal],
+    [activeThreadRef, storeEnsureTerminal],
   );
   const closeTerminal = useCallback(
     (terminalId: string) => {

@@ -2,18 +2,26 @@ import { useAtomValue } from "@effect/atom-react";
 import {
   CheckIcon,
   ChevronRightIcon,
+  CircleAlertIcon,
   CopyIcon,
   GlobeIcon,
   InfoIcon,
   LightbulbIcon,
+  LoaderCircleIcon,
   Maximize2Icon,
   MessageSquareWarningIcon,
   Minimize2Icon,
   OctagonAlertIcon,
+  PlayIcon,
   TriangleAlertIcon,
   WrapTextIcon,
 } from "lucide-react";
-import type { ScopedThreadRef, ServerProviderSkill } from "@t3tools/contracts";
+import type {
+  CommandQuickActionRunResult,
+  OrchestrationQuickAction,
+  ScopedThreadRef,
+  ServerProviderSkill,
+} from "@t3tools/contracts";
 import {
   isAtomCommandInterrupted,
   squashAtomCommandFailure,
@@ -100,6 +108,14 @@ import {
   BrowserPreviewUnavailableError,
 } from "../browser/openFileInPreview";
 
+export type CommandQuickActionExecutionStatus = "running" | "finished" | "error";
+
+export interface CommandQuickActionOutputRenderProps {
+  readonly action: OrchestrationQuickAction;
+  readonly execution: CommandQuickActionRunResult;
+  readonly onStatusChange: (status: CommandQuickActionExecutionStatus) => void;
+}
+
 interface ChatMarkdownProps {
   text: string;
   cwd: string | undefined;
@@ -110,6 +126,11 @@ interface ChatMarkdownProps {
   className?: string;
   /** Treat single newlines as hard breaks — chat-style user input. */
   lineBreaks?: boolean;
+  commandQuickActions?: ReadonlyArray<OrchestrationQuickAction>;
+  onRunCommandQuickAction?: (
+    action: OrchestrationQuickAction,
+  ) => Promise<CommandQuickActionRunResult | null>;
+  renderCommandQuickActionOutput?: (props: CommandQuickActionOutputRenderProps) => ReactNode;
 }
 
 const EMPTY_MARKDOWN_SKILLS: ReadonlyArray<Pick<ServerProviderSkill, "name" | "displayName">> = [];
@@ -588,19 +609,60 @@ function MarkdownCodeBlock({
   language,
   fenceTitle,
   theme,
+  commandQuickAction,
+  onRunCommandQuickAction,
+  renderCommandQuickActionOutput,
   children,
 }: {
   code: string;
   language: string;
   fenceTitle: string | null;
   theme: "light" | "dark";
+  commandQuickAction?: OrchestrationQuickAction;
+  onRunCommandQuickAction?: (
+    action: OrchestrationQuickAction,
+  ) => Promise<CommandQuickActionRunResult | null>;
+  renderCommandQuickActionOutput?: (props: CommandQuickActionOutputRenderProps) => ReactNode;
   children: ReactNode;
 }) {
   const [copied, setCopied] = useState(false);
   const [wrapped, setWrapped] = useState(readInitialWordWrapSetting);
   const copiedTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const [quickActionStatus, setQuickActionStatus] = useState<
+    "idle" | "starting" | CommandQuickActionExecutionStatus
+  >("idle");
+  const [quickActionExecution, setQuickActionExecution] =
+    useState<CommandQuickActionRunResult | null>(null);
   const wrapLabel = wrapped ? "Disable line wrap" : "Wrap lines";
   const copyLabel = copied ? "Copied" : "Copy code";
+  const quickActionLoading = quickActionStatus === "starting" || quickActionStatus === "running";
+
+  const handleRunQuickAction = useCallback(() => {
+    if (
+      commandQuickAction === undefined ||
+      onRunCommandQuickAction === undefined ||
+      quickActionStatus !== "idle"
+    ) {
+      return;
+    }
+    setQuickActionStatus("starting");
+    void onRunCommandQuickAction(commandQuickAction)
+      .then((execution) => {
+        if (execution === null) {
+          setQuickActionStatus("idle");
+          return;
+        }
+        setQuickActionExecution(execution);
+        setQuickActionStatus("running");
+      })
+      .catch((cause) => {
+        setQuickActionStatus("idle");
+        reportMarkdownActionFailure(
+          { operation: "run-command-quick-action", target: commandQuickAction.command },
+          cause,
+        );
+      });
+  }, [commandQuickAction, onRunCommandQuickAction, quickActionStatus]);
 
   const handleCopy = useCallback(() => {
     if (typeof navigator === "undefined" || navigator.clipboard == null) {
@@ -655,6 +717,44 @@ function MarkdownCodeBlock({
           />
         </span>
         <span className="flex items-center gap-0.5" role="toolbar" aria-label="Code block actions">
+          {commandQuickAction !== undefined && onRunCommandQuickAction !== undefined ? (
+            <Tooltip>
+              <TooltipTrigger
+                render={
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="icon-xs"
+                    className="chat-markdown-chrome-action"
+                    disabled={quickActionStatus !== "idle"}
+                    onClick={handleRunQuickAction}
+                    aria-label={
+                      quickActionLoading
+                        ? `Running ${commandQuickAction.command}`
+                        : quickActionStatus === "finished"
+                          ? `Finished ${commandQuickAction.command}`
+                          : quickActionStatus === "error"
+                            ? `Failed ${commandQuickAction.command}`
+                            : `Run ${commandQuickAction.command}`
+                    }
+                  />
+                }
+              >
+                {quickActionLoading ? (
+                  <LoaderCircleIcon className="size-3 animate-spin" />
+                ) : quickActionStatus === "finished" ? (
+                  <CheckIcon className="size-3" />
+                ) : quickActionStatus === "error" ? (
+                  <CircleAlertIcon className="size-3" />
+                ) : (
+                  <PlayIcon className="size-3 fill-current" />
+                )}
+              </TooltipTrigger>
+              <TooltipPopup side="top">
+                {quickActionLoading ? "Running command" : commandQuickAction.label}
+              </TooltipPopup>
+            </Tooltip>
+          ) : null}
           <Tooltip>
             <TooltipTrigger
               render={
@@ -693,6 +793,15 @@ function MarkdownCodeBlock({
         </span>
       </div>
       {children}
+      {commandQuickAction !== undefined &&
+      quickActionExecution !== null &&
+      renderCommandQuickActionOutput !== undefined
+        ? renderCommandQuickActionOutput({
+            action: commandQuickAction,
+            execution: quickActionExecution,
+            onStatusChange: setQuickActionStatus,
+          })
+        : null}
     </div>
   );
 }
@@ -1327,6 +1436,9 @@ function ChatMarkdown({
   skills = EMPTY_MARKDOWN_SKILLS,
   className,
   lineBreaks = false,
+  commandQuickActions,
+  onRunCommandQuickAction,
+  renderCommandQuickActionOutput,
 }: ChatMarkdownProps) {
   const { resolvedTheme } = useTheme();
   const createAssetUrl = useAtomQueryRunner(assetEnvironment.createUrl, {
@@ -1656,12 +1768,20 @@ function ChatMarkdown({
 
         const language = extractFenceLanguage(codeBlock.className);
         const fenceTitle = extractFenceTitle(extractPreCodeMeta(node));
+        const commandQuickAction = commandQuickActions?.find(
+          (action) => action.command.trim() === codeBlock.code.trim(),
+        );
         return (
           <MarkdownCodeBlock
             code={codeBlock.code}
             language={language}
             fenceTitle={fenceTitle}
             theme={resolvedTheme}
+            {...(commandQuickAction === undefined ? {} : { commandQuickAction })}
+            {...(onRunCommandQuickAction === undefined ? {} : { onRunCommandQuickAction })}
+            {...(renderCommandQuickActionOutput === undefined
+              ? {}
+              : { renderCommandQuickActionOutput })}
           >
             <RenderErrorBoundary fallback={<pre {...props}>{children}</pre>}>
               <Suspense fallback={<pre {...props}>{children}</pre>}>
@@ -1678,6 +1798,7 @@ function ChatMarkdown({
       },
     };
   }, [
+    commandQuickActions,
     cwd,
     diffThemeName,
     fileLinkParentSuffixByPath,
@@ -1685,10 +1806,12 @@ function ChatMarkdown({
     isStreaming,
     markdownFileLinkMetaByHref,
     onTaskListChange,
+    onRunCommandQuickAction,
     openInPreferredEditor,
     openExternalLinkInPreview,
     openMarkdownFileInPreview,
     resolvedTheme,
+    renderCommandQuickActionOutput,
     skills,
     text,
     threadRef,

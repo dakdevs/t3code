@@ -48,13 +48,16 @@ import {
   resolveFileDiffPath,
 } from "../../lib/diffRendering";
 import ChatMarkdown from "../ChatMarkdown";
+import type {
+  CommandQuickActionExecutionStatus,
+  CommandQuickActionOutputRenderProps,
+} from "../ChatMarkdown";
 import {
   BotIcon,
   CheckIcon,
   ChevronDownIcon,
   ChevronRightIcon,
   CircleAlertIcon,
-  ExternalLinkIcon,
   EyeIcon,
   GlobeIcon,
   HammerIcon,
@@ -1136,6 +1139,16 @@ function TurnFoldTimelineRow({ row }: { row: Extract<TimelineRow, { kind: "turn-
 function AssistantTimelineRow({ row }: { row: Extract<TimelineRow, { kind: "message" }> }) {
   const ctx = use(TimelineRowCtx);
   const messageText = row.message.text || (row.message.streaming ? "" : "(empty response)");
+  const runCommandQuickAction = useCallback(
+    (action: OrchestrationQuickAction) => ctx.onRunCommandQuickAction(row.message.id, action.id),
+    [ctx, row.message.id],
+  );
+  const renderCommandQuickActionOutput = useCallback(
+    (props: CommandQuickActionOutputRenderProps) => <InlineCommandQuickActionOutput {...props} />,
+    [],
+  );
+  const commandQuickActions =
+    ctx.commandQuickActionsEnabled && !row.message.streaming ? row.message.quickActions : undefined;
 
   return (
     <>
@@ -1146,6 +1159,9 @@ function AssistantTimelineRow({ row }: { row: Extract<TimelineRow, { kind: "mess
           threadRef={ctx.threadRef ?? undefined}
           isStreaming={Boolean(row.message.streaming)}
           skills={ctx.skills}
+          commandQuickActions={commandQuickActions ?? []}
+          onRunCommandQuickAction={runCommandQuickAction}
+          renderCommandQuickActionOutput={renderCommandQuickActionOutput}
         />
         <AssistantChangedFilesSection
           turnSummary={row.assistantTurnDiffSummary}
@@ -1153,19 +1169,6 @@ function AssistantTimelineRow({ row }: { row: Extract<TimelineRow, { kind: "mess
           resolvedTheme={ctx.resolvedTheme}
           onOpenTurnDiff={ctx.onOpenTurnDiff}
         />
-        {ctx.commandQuickActionsEnabled &&
-        !row.message.streaming &&
-        (row.message.quickActions?.length ?? 0) > 0 ? (
-          <div className="mt-2 flex flex-wrap gap-1.5" aria-label="Command quick actions">
-            {row.message.quickActions?.map((action) => (
-              <InlineCommandQuickAction
-                key={action.id}
-                action={action}
-                messageId={row.message.id}
-              />
-            ))}
-          </div>
-        ) : null}
         {row.showAssistantMeta ? (
           <div className="mt-1.5 flex items-center gap-2 text-xs tabular-nums opacity-0 transition-opacity duration-200 focus-within:opacity-100 group-hover/assistant:opacity-100">
             <AssistantCopyButton row={row} />
@@ -1188,21 +1191,17 @@ function AssistantTimelineRow({ row }: { row: Extract<TimelineRow, { kind: "mess
   );
 }
 
-function InlineCommandQuickAction({
+function InlineCommandQuickActionOutput({
   action,
-  messageId,
-}: {
-  action: OrchestrationQuickAction;
-  messageId: MessageId;
-}) {
+  execution,
+  onStatusChange,
+}: CommandQuickActionOutputRenderProps) {
   const ctx = use(TimelineRowCtx);
-  const [starting, setStarting] = useState(false);
-  const [execution, setExecution] = useState<CommandQuickActionRunResult | null>(null);
   const outputRef = useRef<HTMLPreElement>(null);
   const terminal = useAttachedTerminalSession({
-    environmentId: execution === null ? null : ctx.activeThreadEnvironmentId,
+    environmentId: ctx.activeThreadEnvironmentId,
     terminal:
-      execution === null || ctx.threadRef === null
+      ctx.threadRef === null
         ? null
         : {
             threadId: ctx.threadRef.threadId,
@@ -1215,13 +1214,14 @@ function InlineCommandQuickAction({
       : terminal.hasRunningSubprocess || terminal.version === 0
         ? "running"
         : "finished";
-  const output =
-    execution === null
-      ? ""
-      : formatInlineQuickActionOutput(terminal.buffer, execution.historyOffset, {
-          command: action.command,
-          terminalIdle: status !== "running",
-        });
+  const output = formatInlineQuickActionOutput(terminal.buffer, execution.historyOffset, {
+    command: action.command,
+    terminalIdle: status !== "running",
+  });
+
+  useEffect(() => {
+    onStatusChange(status satisfies CommandQuickActionExecutionStatus);
+  }, [onStatusChange, status]);
 
   useEffect(() => {
     const element = outputRef.current;
@@ -1229,35 +1229,9 @@ function InlineCommandQuickAction({
     element.scrollTop = element.scrollHeight;
   }, [output]);
 
-  const run = useCallback(async () => {
-    setStarting(true);
-    try {
-      const result = await ctx.onRunCommandQuickAction(messageId, action.id);
-      if (result !== null) setExecution(result);
-    } finally {
-      setStarting(false);
-    }
-  }, [action.id, ctx, messageId]);
-
-  if (execution === null) {
-    return (
-      <Button
-        type="button"
-        size="xs"
-        variant="outline"
-        disabled={starting}
-        onClick={() => void run()}
-        className="h-7 gap-1.5 px-2 text-xs"
-      >
-        <TerminalIcon className="size-3.5" />
-        {starting ? "Starting…" : action.label}
-      </Button>
-    );
-  }
-
   return (
     <div
-      className="w-full overflow-hidden rounded-lg border border-border/70 bg-muted/20 shadow-xs"
+      className="w-full overflow-hidden border-t border-border/70 bg-muted/20"
       aria-live="polite"
     >
       <div className="flex min-h-9 items-center justify-between gap-3 border-b border-border/60 px-3 py-1.5">
@@ -1277,14 +1251,6 @@ function InlineCommandQuickAction({
           </span>
           <span className="truncate font-mono text-muted-foreground">{action.command}</span>
         </div>
-        <button
-          type="button"
-          onClick={() => ctx.onOpenCommandQuickActionTerminal(execution.terminalId)}
-          className="flex shrink-0 items-center gap-1 rounded px-1.5 py-1 text-muted-foreground text-xs transition-colors hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/70"
-        >
-          <ExternalLinkIcon className="size-3" />
-          Open terminal
-        </button>
       </div>
       <pre
         ref={outputRef}

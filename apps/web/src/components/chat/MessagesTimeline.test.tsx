@@ -229,7 +229,7 @@ function buildUserTimelineEntry(text: string) {
 }
 
 describe("MessagesTimeline", () => {
-  it("renders command quick actions only on a completed assistant message", () => {
+  it("renders command quick actions in the matching code block", () => {
     const markup = renderToStaticMarkup(
       <MessagesTimeline
         {...buildProps()}
@@ -241,7 +241,7 @@ describe("MessagesTimeline", () => {
             message: {
               id: MessageId.make("assistant-quick-action"),
               role: "assistant",
-              text: "You can run this now.",
+              text: "You can run this now.\n\n```bash\nbun test\n```",
               quickActions: [{ id: "code-block-1", label: "Run bun test", command: "bun test" }],
               turnId: TurnId.make("turn-quick-action"),
               createdAt: MESSAGE_CREATED_AT,
@@ -253,8 +253,8 @@ describe("MessagesTimeline", () => {
       />,
     );
 
-    expect(markup).toContain('aria-label="Command quick actions"');
-    expect(markup).toContain("Run bun test");
+    expect(markup).toContain('aria-label="Run bun test"');
+    expect(markup).not.toContain('aria-label="Command quick actions"');
   });
 
   it("uses the larger leading inset only when the top fade is enabled", () => {

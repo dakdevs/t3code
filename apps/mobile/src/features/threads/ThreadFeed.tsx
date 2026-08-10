@@ -24,6 +24,7 @@ import {
   useMemo,
   useRef,
   useState,
+  type ComponentProps,
   type ReactNode,
   type RefObject,
 } from "react";
@@ -251,7 +252,21 @@ interface MarkdownStyleSet {
   readonly styles: NodeStyleOverrides;
   readonly renderers: CustomRenderers;
   readonly nativeTextStyle: NativeMarkdownTextStyle;
+  readonly codeBlockAppearance: MarkdownCodeBlockAppearance;
 }
+
+type MarkdownCodeBlockAppearance = Pick<
+  ComponentProps<typeof MarkdownCodeBlock>,
+  | "backgroundColor"
+  | "borderColor"
+  | "copyTintColor"
+  | "fontSize"
+  | "headerTextColor"
+  | "highlightCode"
+  | "lineHeight"
+  | "textColor"
+  | "theme"
+>;
 
 interface ReviewCommentColors {
   readonly background: ColorValue;
@@ -325,16 +340,72 @@ function MarkdownCodeBlock(props: {
   readonly lineHeight: number;
   readonly textColor: string;
   readonly theme: ReviewDiffTheme;
+  readonly quickAction?: OrchestrationQuickAction;
+  readonly environmentId?: EnvironmentId;
+  readonly messageId?: MessageId;
+  readonly onRunQuickAction?: (
+    messageId: MessageId,
+    actionId: string,
+  ) => Promise<CommandQuickActionRunResult | null>;
+  readonly threadId?: ThreadId;
 }) {
   const content = props.content.replace(/\n$/, "");
   const languageLabel = props.language?.trim() || "text";
+  const [starting, setStarting] = useState(false);
+  const [execution, setExecution] = useState<CommandQuickActionRunResult | null>(null);
+  const outputScrollRef = useRef<ScrollView>(null);
   const highlighted = useMarkdownCodeHighlight({
     code: content,
     enabled: props.highlightCode && Boolean(props.language?.trim()),
     language: props.language,
     theme: props.theme,
   });
+  const terminal = useAttachedTerminalSession({
+    environmentId: execution === null ? null : (props.environmentId ?? null),
+    terminal:
+      execution === null || props.threadId === undefined
+        ? null
+        : { threadId: props.threadId, terminalId: execution.terminalId },
+  });
+  const status =
+    terminal.error !== null || terminal.status === "error"
+      ? "error"
+      : terminal.hasRunningSubprocess || terminal.version === 0
+        ? "running"
+        : "finished";
+  const output =
+    execution === null || props.quickAction === undefined
+      ? ""
+      : formatInlineQuickActionOutput(terminal.buffer, execution.historyOffset, {
+          command: props.quickAction.command,
+          terminalIdle: status !== "running",
+        });
+  const loading = starting || (execution !== null && status === "running");
   let tokenOffset = 0;
+
+  useEffect(() => {
+    outputScrollRef.current?.scrollToEnd({ animated: false });
+  }, [output]);
+
+  const runQuickAction = useCallback(() => {
+    if (
+      props.quickAction === undefined ||
+      props.messageId === undefined ||
+      props.onRunQuickAction === undefined ||
+      starting ||
+      execution !== null
+    ) {
+      return;
+    }
+    setStarting(true);
+    void props
+      .onRunQuickAction(props.messageId, props.quickAction.id)
+      .then((result) => {
+        if (result !== null) setExecution(result);
+      })
+      .catch(() => undefined)
+      .finally(() => setStarting(false));
+  }, [execution, props, starting]);
 
   return (
     <View
@@ -356,13 +427,47 @@ function MarkdownCodeBlock(props: {
         >
           {languageLabel}
         </NativeText>
-        <CopyTextButton
-          accessibilityLabel="Copy code"
-          text={content}
-          tintColor={props.copyTintColor}
-          buttonSize={32}
-          iconSize={16}
-        />
+        <View className="flex-row items-center">
+          {props.quickAction !== undefined ? (
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel={
+                loading
+                  ? `Running ${props.quickAction.command}`
+                  : execution === null
+                    ? `Run ${props.quickAction.command}`
+                    : status === "error"
+                      ? `Failed ${props.quickAction.command}`
+                      : `Finished ${props.quickAction.command}`
+              }
+              accessibilityState={{ disabled: starting || execution !== null }}
+              disabled={starting || execution !== null}
+              onPress={runQuickAction}
+              className="size-8 items-center justify-center rounded-lg disabled:opacity-60"
+              hitSlop={4}
+            >
+              {loading ? (
+                <ActivityIndicator size="small" color={props.copyTintColor} />
+              ) : (
+                <SymbolView
+                  name={
+                    execution === null ? "play.fill" : status === "error" ? "xmark" : "checkmark"
+                  }
+                  size={15}
+                  tintColor={props.copyTintColor}
+                  type="monochrome"
+                />
+              )}
+            </Pressable>
+          ) : null}
+          <CopyTextButton
+            accessibilityLabel="Copy code"
+            text={content}
+            tintColor={props.copyTintColor}
+            buttonSize={32}
+            iconSize={16}
+          />
+        </View>
       </View>
       <ScrollView
         horizontal
@@ -425,6 +530,44 @@ function MarkdownCodeBlock(props: {
             : content}
         </NativeText>
       </ScrollView>
+      {execution !== null && props.quickAction !== undefined ? (
+        <View className="border-t border-border bg-card/20" accessibilityLiveRegion="polite">
+          <View className="min-h-10 flex-row items-center gap-2 border-b border-border px-3 py-2">
+            <View
+              className={cn(
+                "h-1.5 w-1.5 shrink-0 rounded-full",
+                status === "error"
+                  ? "bg-red-500"
+                  : status === "running"
+                    ? "bg-amber-500"
+                    : "bg-emerald-500",
+              )}
+            />
+            <Text className="font-t3-medium text-xs text-foreground">
+              {status === "error"
+                ? "Terminal error"
+                : status === "running"
+                  ? "Running"
+                  : "Finished"}
+            </Text>
+            <Text
+              numberOfLines={1}
+              className="min-w-0 flex-1 font-mono text-xs text-foreground-secondary"
+            >
+              {props.quickAction.command}
+            </Text>
+          </View>
+          <ScrollView ref={outputScrollRef} className="max-h-44" nestedScrollEnabled>
+            <NativeText
+              selectable
+              className="px-3 py-2 font-mono text-[11px] leading-relaxed text-foreground"
+            >
+              {terminal.error ??
+                (output || (status === "running" ? "Waiting for output…" : "No output."))}
+            </NativeText>
+          </ScrollView>
+        </View>
+      ) : null}
     </View>
   );
 }
@@ -741,6 +884,29 @@ function useMarkdownStyles(onLinkPress: (href: string) => void): MarkdownStyleSe
       ...baseStyles,
     };
 
+    const userCodeBlockAppearance: MarkdownCodeBlockAppearance = {
+      backgroundColor: markdownUserFenceBg,
+      borderColor: markdownHrColor,
+      copyTintColor: userBubbleForegroundMuted,
+      fontSize: markdownFontSizes.codeBlockFontSize,
+      headerTextColor: markdownUserFenceText,
+      highlightCode: false,
+      lineHeight: markdownFontSizes.codeBlockLineHeight,
+      textColor: markdownUserFenceText,
+      theme: themeMode,
+    };
+    const assistantCodeBlockAppearance: MarkdownCodeBlockAppearance = {
+      backgroundColor: markdownCodeBg,
+      borderColor: markdownHrColor,
+      copyTintColor: iconSubtleColor,
+      fontSize: markdownFontSizes.codeBlockFontSize,
+      headerTextColor: markdownCodeText,
+      highlightCode: true,
+      lineHeight: markdownFontSizes.codeBlockLineHeight,
+      textColor: markdownCodeText,
+      theme: themeMode,
+    };
+
     return {
       user: {
         theme: userTheme,
@@ -754,6 +920,7 @@ function useMarkdownStyles(onLinkPress: (href: string) => void): MarkdownStyleSe
           true,
           false,
         ),
+        codeBlockAppearance: userCodeBlockAppearance,
         nativeTextStyle: {
           color: markdownUserBodyColor,
           strongColor: markdownUserBodyColor,
@@ -787,6 +954,7 @@ function useMarkdownStyles(onLinkPress: (href: string) => void): MarkdownStyleSe
           false,
           true,
         ),
+        codeBlockAppearance: assistantCodeBlockAppearance,
         nativeTextStyle: {
           color: markdownBodyColor,
           strongColor: markdownStrongColor,
@@ -822,6 +990,102 @@ function useMarkdownStyles(onLinkPress: (href: string) => void): MarkdownStyleSe
     userBubbleForegroundMuted,
   ]);
 }
+
+type AssistantMessageCodeBlockContext = {
+  readonly environmentId: EnvironmentId;
+  readonly markdownStyles: MarkdownStyleSet;
+  readonly messageId: MessageId;
+  readonly onRunQuickAction: (
+    messageId: MessageId,
+    actionId: string,
+  ) => Promise<CommandQuickActionRunResult | null>;
+  readonly quickActions: ReadonlyArray<OrchestrationQuickAction>;
+  readonly threadId: ThreadId;
+};
+
+type NitroCodeBlockRendererProps = Parameters<NonNullable<CustomRenderers["code_block"]>>[0];
+
+function renderAssistantMessageCodeBlock(
+  context: AssistantMessageCodeBlockContext,
+  { content = "", language }: NitroCodeBlockRendererProps,
+) {
+  const quickAction = context.quickActions.find(
+    (action) => action.command.trim() === content.trim(),
+  );
+  return (
+    <MarkdownCodeBlock
+      {...context.markdownStyles.codeBlockAppearance}
+      content={content}
+      environmentId={context.environmentId}
+      language={language}
+      messageId={context.messageId}
+      onRunQuickAction={context.onRunQuickAction}
+      {...(quickAction === undefined ? {} : { quickAction })}
+      threadId={context.threadId}
+    />
+  );
+}
+
+const AssistantMessageMarkdown = memo(function AssistantMessageMarkdown(props: {
+  readonly environmentId: EnvironmentId;
+  readonly markdownStyles: MarkdownStyleSet;
+  readonly messageId: MessageId;
+  readonly onLinkPress: (href: string) => void;
+  readonly onRunQuickAction: (
+    messageId: MessageId,
+    actionId: string,
+  ) => Promise<CommandQuickActionRunResult | null>;
+  readonly quickActions?: ReadonlyArray<OrchestrationQuickAction>;
+  readonly skills?: ReadonlyArray<SelectableMarkdownSkill>;
+  readonly text: string;
+  readonly threadId: ThreadId;
+}) {
+  const renderers = useMemo<CustomRenderers>(() => {
+    if ((props.quickActions?.length ?? 0) === 0) return props.markdownStyles.renderers;
+
+    const context: AssistantMessageCodeBlockContext = {
+      environmentId: props.environmentId,
+      markdownStyles: props.markdownStyles,
+      messageId: props.messageId,
+      onRunQuickAction: props.onRunQuickAction,
+      quickActions: props.quickActions ?? [],
+      threadId: props.threadId,
+    };
+    return {
+      ...props.markdownStyles.renderers,
+      code_block: renderAssistantMessageCodeBlock.bind(null, context),
+    };
+  }, [
+    props.environmentId,
+    props.markdownStyles,
+    props.messageId,
+    props.onRunQuickAction,
+    props.quickActions,
+    props.threadId,
+  ]);
+
+  if ((props.quickActions?.length ?? 0) === 0 && hasNativeSelectableMarkdownText()) {
+    return (
+      <SelectableMarkdownText
+        markdown={props.text}
+        skills={props.skills}
+        textStyle={props.markdownStyles.nativeTextStyle}
+        onLinkPress={props.onLinkPress}
+      />
+    );
+  }
+
+  return (
+    <Markdown
+      options={{ gfm: true }}
+      renderers={renderers}
+      styles={props.markdownStyles.styles}
+      theme={props.markdownStyles.theme}
+    >
+      {props.text}
+    </Markdown>
+  );
+});
 
 function renderFeedEntry(
   info: { item: ThreadFeedEntry; index: number },
@@ -987,23 +1251,21 @@ function renderFeedEntry(
         {...(enterAnimated ? { entering: FadeIn.duration(220) } : {})}
       >
         {message.text.trim().length > 0 ? (
-          hasNativeSelectableMarkdownText() ? (
-            <SelectableMarkdownText
-              markdown={message.text}
-              skills={props.skills}
-              textStyle={styles.nativeTextStyle}
-              onLinkPress={props.onMarkdownLinkPress}
-            />
-          ) : (
-            <Markdown
-              options={{ gfm: true }}
-              renderers={styles.renderers}
-              styles={styles.styles}
-              theme={styles.theme}
-            >
-              {message.text}
-            </Markdown>
-          )
+          <AssistantMessageMarkdown
+            environmentId={props.environmentId}
+            markdownStyles={styles}
+            messageId={message.id}
+            onLinkPress={props.onMarkdownLinkPress}
+            onRunQuickAction={props.onRunCommandQuickAction}
+            quickActions={
+              props.commandQuickActionsEnabled && !message.streaming
+                ? message.quickActions
+                : undefined
+            }
+            skills={props.skills}
+            text={message.text}
+            threadId={props.threadId}
+          />
         ) : null}
         {attachments.map((attachment) => {
           return (
@@ -1016,18 +1278,6 @@ function renderFeedEntry(
             />
           );
         })}
-        {props.commandQuickActionsEnabled &&
-        message.quickActions &&
-        message.quickActions.length > 0 ? (
-          <CommandQuickActions
-            actions={message.quickActions}
-            environmentId={props.environmentId}
-            messageId={message.id}
-            onRun={props.onRunCommandQuickAction}
-            onOpenTerminal={props.onOpenCommandQuickActionTerminal}
-            threadId={props.threadId}
-          />
-        ) : null}
         {showAssistantMeta ? (
           <View className="mt-1 flex-row items-center gap-1">
             <CopyTextButton
@@ -1057,148 +1307,6 @@ function renderFeedEntry(
     />
   );
 }
-
-const CommandQuickActions = memo(function CommandQuickActions(props: {
-  readonly actions: ReadonlyArray<OrchestrationQuickAction>;
-  readonly environmentId: EnvironmentId;
-  readonly messageId: MessageId;
-  readonly onRun: (
-    messageId: MessageId,
-    actionId: string,
-  ) => Promise<CommandQuickActionRunResult | null>;
-  readonly onOpenTerminal: (terminalId: string) => void;
-  readonly threadId: ThreadId;
-}) {
-  return (
-    <View className="mt-3 gap-2">
-      {props.actions.map((action) => (
-        <InlineCommandQuickAction
-          key={action.id}
-          action={action}
-          environmentId={props.environmentId}
-          messageId={props.messageId}
-          onRun={props.onRun}
-          onOpenTerminal={props.onOpenTerminal}
-          threadId={props.threadId}
-        />
-      ))}
-    </View>
-  );
-});
-
-const InlineCommandQuickAction = memo(function InlineCommandQuickAction(props: {
-  readonly action: OrchestrationQuickAction;
-  readonly environmentId: EnvironmentId;
-  readonly messageId: MessageId;
-  readonly onRun: (
-    messageId: MessageId,
-    actionId: string,
-  ) => Promise<CommandQuickActionRunResult | null>;
-  readonly onOpenTerminal: (terminalId: string) => void;
-  readonly threadId: ThreadId;
-}) {
-  const [starting, setStarting] = useState(false);
-  const [execution, setExecution] = useState<CommandQuickActionRunResult | null>(null);
-  const outputScrollRef = useRef<ScrollView>(null);
-  const iconColor = useThemeColor("--color-icon");
-  const terminal = useAttachedTerminalSession({
-    environmentId: execution === null ? null : props.environmentId,
-    terminal:
-      execution === null ? null : { threadId: props.threadId, terminalId: execution.terminalId },
-  });
-  const status =
-    terminal.error !== null || terminal.status === "error"
-      ? "error"
-      : terminal.hasRunningSubprocess || terminal.version === 0
-        ? "running"
-        : "finished";
-  const output =
-    execution === null
-      ? ""
-      : formatInlineQuickActionOutput(terminal.buffer, execution.historyOffset, {
-          command: props.action.command,
-          terminalIdle: status !== "running",
-        });
-
-  useEffect(() => {
-    outputScrollRef.current?.scrollToEnd({ animated: false });
-  }, [output]);
-
-  if (execution === null) {
-    return (
-      <Pressable
-        accessibilityRole="button"
-        accessibilityLabel={props.action.label}
-        disabled={starting}
-        onPress={() => {
-          setStarting(true);
-          void props
-            .onRun(props.messageId, props.action.id)
-            .then((result) => {
-              if (result !== null) setExecution(result);
-            })
-            .finally(() => setStarting(false));
-        }}
-        className="min-h-10 self-start flex-row items-center gap-2 rounded-xl border border-border bg-card px-3 py-2 disabled:opacity-50"
-      >
-        {starting ? (
-          <ActivityIndicator size="small" />
-        ) : (
-          <SymbolView name="terminal" size={15} tintColor={iconColor} type="monochrome" />
-        )}
-        <Text className="font-t3-medium text-sm text-foreground">
-          {starting ? "Starting…" : props.action.label}
-        </Text>
-      </Pressable>
-    );
-  }
-
-  return (
-    <View className="overflow-hidden rounded-xl border border-border bg-card">
-      <View className="min-h-10 flex-row items-center justify-between gap-3 border-b border-border px-3 py-2">
-        <View className="min-w-0 flex-1 flex-row items-center gap-2">
-          <View
-            className={cn(
-              "h-1.5 w-1.5 shrink-0 rounded-full",
-              status === "error"
-                ? "bg-red-500"
-                : status === "running"
-                  ? "bg-amber-500"
-                  : "bg-emerald-500",
-            )}
-          />
-          <Text className="font-t3-medium text-xs text-foreground">
-            {status === "error" ? "Terminal error" : status === "running" ? "Running" : "Finished"}
-          </Text>
-          <Text
-            numberOfLines={1}
-            className="min-w-0 flex-1 font-mono text-xs text-foreground-secondary"
-          >
-            {props.action.command}
-          </Text>
-        </View>
-        <Pressable
-          accessibilityRole="button"
-          accessibilityLabel="Open terminal"
-          onPress={() => props.onOpenTerminal(execution.terminalId)}
-          className="flex-row items-center gap-1 rounded-lg px-1.5 py-1"
-        >
-          <SymbolView name="arrow.up.right" size={12} tintColor={iconColor} type="monochrome" />
-          <Text className="font-t3-medium text-xs text-foreground-secondary">Open</Text>
-        </Pressable>
-      </View>
-      <ScrollView ref={outputScrollRef} className="max-h-44" nestedScrollEnabled>
-        <NativeText
-          selectable
-          className="px-3 py-2 font-mono text-[11px] leading-relaxed text-foreground"
-        >
-          {terminal.error ??
-            (output || (status === "running" ? "Waiting for output…" : "No output."))}
-        </NativeText>
-      </ScrollView>
-    </View>
-  );
-});
 
 const WorkingTimelineRow = memo(function WorkingTimelineRow(props: { readonly startedAt: string }) {
   const [nowMs, setNowMs] = useState(() => Date.now());

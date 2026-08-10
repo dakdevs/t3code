@@ -112,7 +112,6 @@ describe("terminal session reducers", () => {
       `if command -v bash;then printf '\\n__T3_CODE_QUICK_ACTION_COMPLETE__:%s\\n' "$s"\r\n`,
       "n\r\n",
       "n';fi\r\n",
-      "__T3_CODE_QUICK_ACTION_START__\r\n",
       "chore/upgrade-all-dependencies\r\n",
       `${COMMAND_QUICK_ACTION_COMPLETION_MARKER}0\r\n`,
       "$ ",

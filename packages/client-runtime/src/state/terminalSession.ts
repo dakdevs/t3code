@@ -143,6 +143,9 @@ function trimQuickActionShellTranscript(
         ) {
           lastEchoIndex = index;
         }
+        if (line.endsWith("n';fi")) {
+          lastEchoIndex = index;
+        }
       }
       if (lastEchoIndex >= 0) {
         lines = lines.slice(lastEchoIndex + 1);

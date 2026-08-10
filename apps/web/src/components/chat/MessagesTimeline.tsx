@@ -1255,18 +1255,37 @@ function InlineCommandQuickActionOutput({
             terminalId: execution.terminalId,
           },
   });
-  const status =
-    terminal.error !== null || terminal.status === "error"
-      ? "error"
-      : terminal.hasRunningSubprocess || terminal.version === 0
-        ? "running"
-        : "finished";
+  const [status, setStatus] = useState<CommandQuickActionExecutionStatus>("running");
+  const finishedRef = useRef(false);
+
+  useEffect(() => {
+    finishedRef.current = false;
+    setStatus("running");
+  }, [execution.terminalId]);
+
+  useEffect(() => {
+    if (terminal.error !== null || terminal.status === "error") {
+      setStatus("error");
+      return;
+    }
+    if (finishedRef.current) return;
+    if (terminal.version === 0 || terminal.hasRunningSubprocess) {
+      setStatus("running");
+      return;
+    }
+
+    const timeout = setTimeout(() => {
+      finishedRef.current = true;
+      setStatus("finished");
+    }, 1_000);
+    return () => clearTimeout(timeout);
+  }, [terminal.error, terminal.hasRunningSubprocess, terminal.status, terminal.version]);
   const output =
     terminal.version === 0
       ? ""
       : formatInlineQuickActionOutput(terminal.buffer, execution.historyOffset, {
           command: action.command,
-          terminalIdle: status !== "running",
+          terminalIdle: !terminal.hasRunningSubprocess,
         });
 
   useEffect(() => {

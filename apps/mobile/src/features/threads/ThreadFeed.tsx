@@ -375,18 +375,38 @@ function MarkdownCodeBlock(props: {
         ? null
         : { threadId: props.threadId, terminalId: execution.terminalId },
   });
-  const status =
-    terminal.error !== null || terminal.status === "error"
-      ? "error"
-      : terminal.hasRunningSubprocess || terminal.version === 0
-        ? "running"
-        : "finished";
+  const [status, setStatus] = useState<"running" | "finished" | "error">("running");
+  const finishedRef = useRef(false);
+
+  useEffect(() => {
+    finishedRef.current = false;
+    setStatus("running");
+  }, [execution?.terminalId]);
+
+  useEffect(() => {
+    if (execution === null) return;
+    if (terminal.error !== null || terminal.status === "error") {
+      setStatus("error");
+      return;
+    }
+    if (finishedRef.current) return;
+    if (terminal.version === 0 || terminal.hasRunningSubprocess) {
+      setStatus("running");
+      return;
+    }
+
+    const timeout = setTimeout(() => {
+      finishedRef.current = true;
+      setStatus("finished");
+    }, 1_000);
+    return () => clearTimeout(timeout);
+  }, [execution, terminal.error, terminal.hasRunningSubprocess, terminal.status, terminal.version]);
   const output =
     execution === null || props.quickAction === undefined || terminal.version === 0
       ? ""
       : formatInlineQuickActionOutput(terminal.buffer, execution.historyOffset, {
           command: props.quickAction.command,
-          terminalIdle: status !== "running",
+          terminalIdle: !terminal.hasRunningSubprocess,
         });
   const loading = quickActionStatus === "starting" || quickActionStatus === "running";
   let tokenOffset = 0;

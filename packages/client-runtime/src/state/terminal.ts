@@ -89,6 +89,12 @@ export function createTerminalEnvironmentAtoms<R, E>(
       scheduler: lifecycleScheduler,
       concurrency: lifecycleConcurrency,
     }),
+    runCommandQuickAction: createEnvironmentRpcCommand(runtime, {
+      label: "environment-data:command-quick-action:run",
+      tag: WS_METHODS.commandQuickActionRun,
+      scheduler: lifecycleScheduler,
+      concurrency: lifecycleConcurrency,
+    }),
   };
 }
 

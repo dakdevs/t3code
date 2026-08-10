@@ -85,6 +85,7 @@ import * as ServerLifecycleEvents from "./serverLifecycleEvents.ts";
 import * as ServerRuntimeStartup from "./serverRuntimeStartup.ts";
 import * as ServerSettings from "./serverSettings.ts";
 import * as TerminalManager from "./terminal/Manager.ts";
+import * as CommandQuickActionRunner from "./quick-actions/command-quick-action-runner.ts";
 import * as PreviewAutomationBroker from "./mcp/PreviewAutomationBroker.ts";
 import * as PreviewManager from "./preview/Manager.ts";
 import { issueAssetUrl } from "./assets/AssetAccess.ts";
@@ -366,6 +367,7 @@ const makeWsRpcLayer = (
       const vcsProvisioning = yield* VcsProvisioningService.VcsProvisioningService;
       const vcsStatusBroadcaster = yield* VcsStatusBroadcaster.VcsStatusBroadcaster;
       const terminalManager = yield* TerminalManager.TerminalManager;
+      const commandQuickActionRunner = yield* CommandQuickActionRunner.CommandQuickActionRunner;
       const previewManager = yield* PreviewManager.PreviewManager;
       const portDiscovery = yield* PortScanner.PortDiscovery;
       const providerRegistry = yield* ProviderRegistry.ProviderRegistry;
@@ -1037,7 +1039,16 @@ const makeWsRpcLayer = (
           observeRpcEffect(
             ORCHESTRATION_WS_METHODS.dispatchCommand,
             Effect.gen(function* () {
-              const normalizedCommand = yield* normalizeDispatchCommand(command);
+              const normalizedBaseCommand = yield* normalizeDispatchCommand(command);
+              const normalizedCommand =
+                normalizedBaseCommand.type === "thread.turn.start"
+                  ? {
+                      ...normalizedBaseCommand,
+                      providerContext: yield* commandQuickActionRunner.takeAvailableOutputContext(
+                        normalizedBaseCommand.threadId,
+                      ),
+                    }
+                  : normalizedBaseCommand;
               // Archive and settle both mean "done with this thread", so a
               // live provider session must not keep running background work
               // (PR monitors, dev servers, subagent fleets) after either
@@ -2041,6 +2052,10 @@ const makeWsRpcLayer = (
           }),
         [WS_METHODS.terminalClose]: (input) =>
           observeRpcEffect(WS_METHODS.terminalClose, terminalManager.close(input), {
+            "rpc.aggregate": "terminal",
+          }),
+        [WS_METHODS.commandQuickActionRun]: (input) =>
+          observeRpcEffect(WS_METHODS.commandQuickActionRun, commandQuickActionRunner.run(input), {
             "rpc.aggregate": "terminal",
           }),
         [WS_METHODS.subscribeTerminalEvents]: (_input) =>

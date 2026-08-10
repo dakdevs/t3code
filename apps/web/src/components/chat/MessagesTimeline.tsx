@@ -129,6 +129,7 @@ import {
 // ---------------------------------------------------------------------------
 
 interface TimelineRowSharedState {
+  commandQuickActionsEnabled: boolean;
   timestampFormat: TimestampFormat;
   routeThreadKey: string;
   threadRef: ScopedThreadRef | null;
@@ -140,6 +141,7 @@ interface TimelineRowSharedState {
   onRevertUserMessage: (messageId: MessageId) => void;
   onImageExpand: (preview: ExpandedImagePreview) => void;
   onOpenTurnDiff: (turnId: TurnId, filePath?: string) => void;
+  onRunCommandQuickAction: (messageId: MessageId, actionId: string) => Promise<void>;
   onToggleTurnFold: (turnId: TurnId) => void;
   onToggleWorkGroup: (groupId: string, anchorKey: string) => void;
   agentPanelModel: AgentPanelModel;
@@ -202,6 +204,7 @@ const TIMELINE_MAINTAIN_SCROLL_AT_END = {
 // ---------------------------------------------------------------------------
 
 interface MessagesTimelineProps {
+  commandQuickActionsEnabled: boolean;
   agentPanelModel?: AgentPanelModel;
   onOpenAgents?: () => void;
   isWorking: boolean;
@@ -215,6 +218,7 @@ interface MessagesTimelineProps {
   turnDiffSummaryByAssistantMessageId: Map<MessageId, TurnDiffSummary>;
   routeThreadKey: string;
   onOpenTurnDiff: (turnId: TurnId, filePath?: string) => void;
+  onRunCommandQuickAction: (messageId: MessageId, actionId: string) => Promise<void>;
   revertTurnCountByUserMessageId: Map<MessageId, number>;
   onRevertUserMessage: (messageId: MessageId) => void;
   isRevertingCheckpoint: boolean;
@@ -248,6 +252,7 @@ interface MessagesTimelineProps {
 // ---------------------------------------------------------------------------
 
 export const MessagesTimeline = memo(function MessagesTimeline({
+  commandQuickActionsEnabled,
   isWorking,
   workingStepLabel = null,
   activeTurnInProgress,
@@ -261,6 +266,7 @@ export const MessagesTimeline = memo(function MessagesTimeline({
   turnDiffSummaryByAssistantMessageId,
   routeThreadKey,
   onOpenTurnDiff,
+  onRunCommandQuickAction,
   revertTurnCountByUserMessageId,
   onRevertUserMessage,
   isRevertingCheckpoint,
@@ -511,8 +517,10 @@ export const MessagesTimeline = memo(function MessagesTimeline({
       skills,
       activeThreadEnvironmentId,
       onRevertUserMessage,
+      commandQuickActionsEnabled,
       onImageExpand,
       onOpenTurnDiff,
+      onRunCommandQuickAction,
       onToggleTurnFold,
       onToggleWorkGroup,
       agentPanelModel,
@@ -527,8 +535,10 @@ export const MessagesTimeline = memo(function MessagesTimeline({
       skills,
       activeThreadEnvironmentId,
       onRevertUserMessage,
+      commandQuickActionsEnabled,
       onImageExpand,
       onOpenTurnDiff,
+      onRunCommandQuickAction,
       onToggleTurnFold,
       onToggleWorkGroup,
       agentPanelModel,
@@ -1110,6 +1120,18 @@ function TurnFoldTimelineRow({ row }: { row: Extract<TimelineRow, { kind: "turn-
 function AssistantTimelineRow({ row }: { row: Extract<TimelineRow, { kind: "message" }> }) {
   const ctx = use(TimelineRowCtx);
   const messageText = row.message.text || (row.message.streaming ? "" : "(empty response)");
+  const [runningActionId, setRunningActionId] = useState<string | null>(null);
+  const runQuickAction = useCallback(
+    async (actionId: string) => {
+      setRunningActionId(actionId);
+      try {
+        await ctx.onRunCommandQuickAction(row.message.id, actionId);
+      } finally {
+        setRunningActionId(null);
+      }
+    },
+    [ctx, row.message.id],
+  );
 
   return (
     <>
@@ -1127,6 +1149,26 @@ function AssistantTimelineRow({ row }: { row: Extract<TimelineRow, { kind: "mess
           resolvedTheme={ctx.resolvedTheme}
           onOpenTurnDiff={ctx.onOpenTurnDiff}
         />
+        {ctx.commandQuickActionsEnabled &&
+        !row.message.streaming &&
+        (row.message.quickActions?.length ?? 0) > 0 ? (
+          <div className="mt-2 flex flex-wrap gap-1.5" aria-label="Command quick actions">
+            {row.message.quickActions?.map((action) => (
+              <Button
+                key={action.id}
+                type="button"
+                size="xs"
+                variant="outline"
+                disabled={runningActionId !== null}
+                onClick={() => void runQuickAction(action.id)}
+                className="h-7 gap-1.5 px-2 text-xs"
+              >
+                <TerminalIcon className="size-3.5" />
+                {runningActionId === action.id ? "Running…" : action.label}
+              </Button>
+            ))}
+          </div>
+        ) : null}
         {row.showAssistantMeta ? (
           <div className="mt-1.5 flex items-center gap-2 text-xs tabular-nums opacity-0 transition-opacity duration-200 focus-within:opacity-100 group-hover/assistant:opacity-100">
             <AssistantCopyButton row={row} />

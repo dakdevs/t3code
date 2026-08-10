@@ -69,6 +69,7 @@ export function shouldPublishAgentAwarenessEvent(event: OrchestrationEvent): boo
   switch (event.type) {
     case "thread.message-sent":
     case "thread.turn-start-requested":
+    case "thread.quick-actions-detection-requested":
       // These events express intent to start work, but the shell still contains
       // the previous turn's terminal state until the provider acknowledges the
       // new turn. Publishing that snapshot can queue a fresh "Done" alert just

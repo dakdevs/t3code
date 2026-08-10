@@ -30,6 +30,8 @@ import { increment, orchestrationEventsProcessedTotal } from "../../observabilit
 import { ProviderAdapterRequestError } from "../../provider/Errors.ts";
 import type { ProviderServiceError } from "../../provider/Errors.ts";
 import { TextGeneration } from "../../textGeneration/TextGeneration.ts";
+import { detectCommandQuickActions } from "../../quick-actions/command-quick-action-validator.ts";
+import { selectFinalAssistantMessage } from "../../quick-actions/command-quick-action-selection.ts";
 import { ProviderService } from "../../provider/Services/ProviderService.ts";
 import { ProviderRegistry } from "../../provider/Services/ProviderRegistry.ts";
 import { OrchestrationEngineService } from "../Services/OrchestrationEngine.ts";
@@ -58,7 +60,8 @@ type ProviderIntentEvent = Extract<
       | "thread.turn-interrupt-requested"
       | "thread.approval-response-requested"
       | "thread.user-input-response-requested"
-      | "thread.session-stop-requested";
+      | "thread.session-stop-requested"
+      | "thread.quick-actions-detection-requested";
   }
 >;
 
@@ -1163,7 +1166,10 @@ const make = Effect.gen(function* () {
 
     const sendTurnRequest = yield* buildSendTurnRequestForThread({
       threadId: event.payload.threadId,
-      messageText: message.text,
+      messageText:
+        event.payload.providerContext !== undefined
+          ? `${message.text}\n\n${event.payload.providerContext}`
+          : message.text,
       ...(message.attachments !== undefined ? { attachments: message.attachments } : {}),
       ...(event.payload.modelSelection !== undefined
         ? { modelSelection: event.payload.modelSelection }
@@ -1326,6 +1332,33 @@ const make = Effect.gen(function* () {
     });
   });
 
+  const processQuickActionsDetectionRequested = Effect.fn("processQuickActionsDetectionRequested")(
+    function* (
+      event: Extract<ProviderIntentEvent, { type: "thread.quick-actions-detection-requested" }>,
+    ) {
+      const settings = yield* serverSettingsService.getSettings;
+      if (!settings.enableCommandQuickActions) return;
+
+      const thread = yield* resolveThread(event.payload.threadId);
+      const message = thread
+        ? selectFinalAssistantMessage(thread.messages, event.payload.turnId)
+        : undefined;
+      if (!thread || !message) return;
+      const project = yield* resolveProject(thread.projectId);
+      const cwd =
+        resolveThreadWorkspaceCwd({ thread, projects: project ? [project] : [] }) ?? process.cwd();
+      const quickActions = yield* detectCommandQuickActions(cwd, message.text);
+      yield* orchestrationEngine.dispatch({
+        type: "thread.message.quick-actions.set",
+        commandId: yield* serverCommandId("message-quick-actions"),
+        threadId: thread.id,
+        messageId: message.id,
+        quickActions: [...quickActions],
+        createdAt: event.occurredAt,
+      });
+    },
+  );
+
   const processDomainEvent = Effect.fn("processDomainEvent")(function* (
     event: ProviderIntentEvent,
   ) {
@@ -1369,6 +1402,9 @@ const make = Effect.gen(function* () {
       case "thread.session-stop-requested":
         yield* processSessionStopRequested(event);
         return;
+      case "thread.quick-actions-detection-requested":
+        yield* processQuickActionsDetectionRequested(event);
+        return;
     }
   });
 
@@ -1407,7 +1443,8 @@ const make = Effect.gen(function* () {
         event.type === "thread.turn-interrupt-requested" ||
         event.type === "thread.approval-response-requested" ||
         event.type === "thread.user-input-response-requested" ||
-        event.type === "thread.session-stop-requested"
+        event.type === "thread.session-stop-requested" ||
+        event.type === "thread.quick-actions-detection-requested"
       ) {
         return yield* worker.enqueue(event);
       }

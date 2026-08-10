@@ -111,6 +111,9 @@ import {
   ProjectWriteFileResult,
 } from "./project.ts";
 import {
+  CommandQuickActionRunError,
+  CommandQuickActionRunInput,
+  CommandQuickActionRunResult,
   TerminalAttachInput,
   TerminalAttachStreamEvent,
   TerminalClearInput,
@@ -232,6 +235,7 @@ export const WS_METHODS = {
   terminalClear: "terminal.clear",
   terminalRestart: "terminal.restart",
   terminalClose: "terminal.close",
+  commandQuickActionRun: "commandQuickAction.run",
 
   // Preview methods
   previewOpen: "preview.open",
@@ -759,6 +763,12 @@ export const WsTerminalCloseRpc = Rpc.make(WS_METHODS.terminalClose, {
   error: Schema.Union([TerminalError, EnvironmentAuthorizationError]),
 });
 
+export const WsCommandQuickActionRunRpc = Rpc.make(WS_METHODS.commandQuickActionRun, {
+  payload: CommandQuickActionRunInput,
+  success: CommandQuickActionRunResult,
+  error: Schema.Union([CommandQuickActionRunError, EnvironmentAuthorizationError]),
+});
+
 export const WsPreviewOpenRpc = Rpc.make(WS_METHODS.previewOpen, {
   payload: PreviewOpenInput,
   success: PreviewSessionSnapshot,
@@ -1015,6 +1025,7 @@ export const WsRpcGroup = RpcGroup.make(
   WsTerminalClearRpc,
   WsTerminalRestartRpc,
   WsTerminalCloseRpc,
+  WsCommandQuickActionRunRpc,
   WsSubscribeTerminalEventsRpc,
   WsSubscribeTerminalMetadataRpc,
   WsPreviewOpenRpc,

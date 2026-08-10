@@ -80,6 +80,7 @@ export interface ThreadDetailScreenProps {
   readonly onStopThread: () => void;
   readonly onSendMessage: () => Promise<MessageId | null>;
   readonly onReconnectEnvironment: () => void;
+  readonly onRunCommandQuickAction: (messageId: MessageId, actionId: string) => Promise<void>;
   readonly onUpdateThreadModelSelection: (modelSelection: ModelSelection) => void;
   readonly onUpdateThreadRuntimeMode: (runtimeMode: RuntimeMode) => void;
   readonly onUpdateThreadInteractionMode: (interactionMode: ProviderInteractionMode) => void;
@@ -373,7 +374,11 @@ export const ThreadDetailScreen = memo(function ThreadDetailScreen(props: Thread
             usesAutomaticContentInsets={props.usesAutomaticContentInsets}
             onHeaderMaterialVisibilityChange={props.onHeaderMaterialVisibilityChange}
             skills={selectedProviderSkills}
+            commandQuickActionsEnabled={
+              props.serverConfig?.settings.enableCommandQuickActions ?? false
+            }
             loadEarlier={props.loadEarlier ?? null}
+            onRunCommandQuickAction={props.onRunCommandQuickAction}
           />
         </View>
       ) : (

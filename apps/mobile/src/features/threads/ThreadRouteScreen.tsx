@@ -6,14 +6,16 @@ import {
   type StaticScreenProps,
 } from "@react-navigation/native";
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import * as Cause from "effect/Cause";
 import * as Option from "effect/Option";
-import { EnvironmentId, ThreadId, type ProjectScript } from "@t3tools/contracts";
+import { AsyncResult } from "effect/unstable/reactivity";
+import { EnvironmentId, ThreadId, type MessageId, type ProjectScript } from "@t3tools/contracts";
 import {
   requestOlderThreadTurns,
   threadHasOlderTurns,
 } from "@t3tools/client-runtime/state/threads";
 import { projectScriptCwd, projectScriptRuntimeEnv } from "@t3tools/shared/projectScripts";
-import { Platform, ScrollView, View } from "react-native";
+import { Alert, Platform, ScrollView, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useWorkspaceState } from "../../state/workspace";
 import { useEnvironmentQuery } from "../../state/query";
@@ -63,6 +65,7 @@ import { useSelectedThreadRequests } from "../../state/use-selected-thread-reque
 import { useSelectedThreadWorktree } from "../../state/use-selected-thread-worktree";
 import { useThreadComposerState } from "../../state/use-thread-composer-state";
 import { threadEnvironment } from "../../state/threads";
+import { terminalEnvironment } from "../../state/terminal";
 import { projectThreadContentPresentation } from "./threadContentPresentation";
 import {
   useAdaptiveWorkspaceLayout,
@@ -214,6 +217,10 @@ function ThreadRouteContent(
   const gitActions = useSelectedThreadGitActions();
   const requests = useSelectedThreadRequests();
   const interruptThreadTurn = useAtomCommand(threadEnvironment.interruptTurn, "thread interrupt");
+  const runCommandQuickAction = useAtomCommand(
+    terminalEnvironment.runCommandQuickAction,
+    "command quick action",
+  );
   const navigation = useNavigation();
   const params = props.route.params;
   const environmentIdRaw = firstRouteParam(params.environmentId);
@@ -539,6 +546,39 @@ function ThreadRouteContent(
     });
   }, [navigation, selectedThread, selectedThreadProject?.workspaceRoot, terminalMenuSessions]);
 
+  const handleRunCommandQuickAction = useCallback(
+    async (messageId: MessageId, actionId: string) => {
+      if (!selectedThread || !selectedThreadProject?.workspaceRoot) return;
+      const terminalId = nextOpenTerminalId({
+        listedTerminalIds: terminalMenuSessions.map((session) => session.terminalId),
+      });
+      const result = await runCommandQuickAction({
+        environmentId: selectedThread.environmentId,
+        input: { threadId: selectedThread.id, messageId, actionId, terminalId },
+      });
+      if (AsyncResult.isFailure(result)) {
+        const error = Cause.squash(result.cause);
+        Alert.alert(
+          "Command unavailable",
+          error instanceof Error ? error.message : "Could not run this command.",
+        );
+        return;
+      }
+      void navigation.navigate("ThreadTerminal", {
+        environmentId: String(selectedThread.environmentId),
+        threadId: String(selectedThread.id),
+        terminalId: result.value.terminalId,
+      });
+    },
+    [
+      navigation,
+      runCommandQuickAction,
+      selectedThread,
+      selectedThreadProject?.workspaceRoot,
+      terminalMenuSessions,
+    ],
+  );
+
   const handleRunProjectScript = useCallback(
     async (script: ProjectScript) => {
       terminalDebugLog("project-script:press", {
@@ -801,6 +841,7 @@ function ThreadRouteContent(
           onStopThread={handleStopThread}
           onSendMessage={composer.onSendMessage}
           onReconnectEnvironment={handleReconnectEnvironment}
+          onRunCommandQuickAction={handleRunCommandQuickAction}
           onUpdateThreadModelSelection={composer.onUpdateModelSelection}
           onUpdateThreadRuntimeMode={composer.onUpdateRuntimeMode}
           onUpdateThreadInteractionMode={composer.onUpdateInteractionMode}

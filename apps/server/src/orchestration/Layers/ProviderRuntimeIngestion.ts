@@ -1855,6 +1855,14 @@ const make = Effect.gen(function* () {
             turnId,
             updatedAt: now,
           });
+
+          yield* orchestrationEngine.dispatch({
+            type: "thread.quick-actions.detection.request",
+            commandId: yield* providerCommandId(event, "quick-actions-detection-request"),
+            threadId: thread.id,
+            turnId,
+            createdAt: now,
+          });
         }
       }
 

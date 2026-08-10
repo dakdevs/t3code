@@ -2157,6 +2157,20 @@ export function GeneralSettingsPanel() {
         />
 
         <SettingsRow
+          {...searchableSetting("command-quick-actions")}
+          description="Detect valid runnable command blocks in final agent replies and offer them as terminal actions. Commands only run when clicked."
+          control={
+            <Switch
+              checked={settings.enableCommandQuickActions}
+              onCheckedChange={(checked) =>
+                updateSettings({ enableCommandQuickActions: Boolean(checked) })
+              }
+              aria-label="Enable command quick actions"
+            />
+          }
+        />
+
+        <SettingsRow
           {...searchableSetting("text-generation-model")}
           description="Default model for generated text like thread titles and source control content. Source control settings can override it with a dedicated source control writer model."
           resetAction={

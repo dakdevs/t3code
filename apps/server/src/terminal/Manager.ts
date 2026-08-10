@@ -142,6 +142,17 @@ export class TerminalManager extends Context.Service<
      */
     readonly write: (input: TerminalWriteInput) => Effect.Effect<void, TerminalError>;
 
+    /** Read the current in-memory state for a terminal without attaching a client. */
+    readonly inspect: (input: {
+      readonly threadId: string;
+      readonly terminalId: string;
+    }) => Effect.Effect<
+      Option.Option<{
+        readonly snapshot: TerminalSessionSnapshot;
+        readonly hasRunningSubprocess: boolean;
+      }>
+    >;
+
     /**
      * Resize the PTY backing a terminal session.
      */
@@ -2306,6 +2317,16 @@ export const makeWithOptions = Effect.fn("TerminalManager.makeWithOptions")(func
   const open: TerminalManager["Service"]["open"] = (input) =>
     withThreadLock(input.threadId, openLocked(input));
 
+  const inspect: TerminalManager["Service"]["inspect"] = (input) =>
+    getSession(input.threadId, input.terminalId).pipe(
+      Effect.map(
+        Option.map((session) => ({
+          snapshot: snapshot(session),
+          hasRunningSubprocess: session.hasRunningSubprocess,
+        })),
+      ),
+    );
+
   const openOrAttachForStream = (input: TerminalAttachInput) =>
     withThreadLock(
       input.threadId,
@@ -2693,6 +2714,7 @@ export const makeWithOptions = Effect.fn("TerminalManager.makeWithOptions")(func
 
   return TerminalManager.of({
     open,
+    inspect,
     attachStream,
     write,
     resize,

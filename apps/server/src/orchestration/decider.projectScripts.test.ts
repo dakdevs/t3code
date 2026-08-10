@@ -310,6 +310,7 @@ it.layer(NodeServices.layer)("decider project scripts", (it) => {
             text: "hello",
             attachments: [],
           },
+          providerContext: "<terminal_context>tests passed</terminal_context>",
           modelSelection: createModelSelection(ProviderInstanceId.make("codex"), "gpt-5.3-codex", [
             { id: "reasoningEffort", value: "high" },
             { id: "fastMode", value: true },
@@ -334,6 +335,7 @@ it.layer(NodeServices.layer)("decider project scripts", (it) => {
       expect(turnStartEvent.payload).toMatchObject({
         threadId: ThreadId.make("thread-1"),
         messageId: asMessageId("message-user-1"),
+        providerContext: "<terminal_context>tests passed</terminal_context>",
         modelSelection: createModelSelection(ProviderInstanceId.make("codex"), "gpt-5.3-codex", [
           { id: "reasoningEffort", value: "high" },
           { id: "fastMode", value: true },

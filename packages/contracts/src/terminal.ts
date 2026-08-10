@@ -1,5 +1,5 @@
 import * as Schema from "effect/Schema";
-import { TrimmedNonEmptyString } from "./baseSchemas.ts";
+import { MessageId, ThreadId, TrimmedNonEmptyString } from "./baseSchemas.ts";
 
 /**
  * Client-side id for the first shell opened on a thread. Ids are uniformly
@@ -30,7 +30,7 @@ export const TerminalThreadInput = Schema.Struct({
 export type TerminalThreadInput = typeof TerminalThreadInput.Type;
 
 /** Terminal ids are ALWAYS chosen by the client and sent explicitly — no server-side allocation. */
-const TerminalSessionInput = Schema.Struct({
+export const TerminalSessionInput = Schema.Struct({
   ...TerminalThreadInput.fields,
   terminalId: TerminalIdSchema,
 });
@@ -89,6 +89,31 @@ export const TerminalCloseInput = Schema.Struct({
   deleteHistory: Schema.optional(Schema.Boolean),
 });
 export type TerminalCloseInput = typeof TerminalCloseInput.Type;
+
+export const CommandQuickActionRunInput = Schema.Struct({
+  threadId: ThreadId,
+  messageId: MessageId,
+  actionId: TrimmedNonEmptyStringSchema,
+  terminalId: TerminalIdSchema,
+});
+export type CommandQuickActionRunInput = typeof CommandQuickActionRunInput.Type;
+
+export const CommandQuickActionRunResult = Schema.Struct({
+  terminalId: TerminalIdSchema,
+});
+export type CommandQuickActionRunResult = typeof CommandQuickActionRunResult.Type;
+
+export class CommandQuickActionRunError extends Schema.TaggedErrorClass<CommandQuickActionRunError>()(
+  "CommandQuickActionRunError",
+  {
+    reason: Schema.Literals(["not-found", "unavailable", "terminal"]),
+    detail: Schema.String,
+  },
+) {
+  override get message(): string {
+    return this.detail;
+  }
+}
 
 export const TerminalSessionStatus = Schema.Literals(["starting", "running", "exited", "error"]);
 export type TerminalSessionStatus = typeof TerminalSessionStatus.Type;

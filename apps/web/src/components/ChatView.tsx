@@ -896,7 +896,6 @@ const PersistentThreadTerminalDrawer = memo(function PersistentThreadTerminalDra
     threadRef,
     openTerminal,
   ]);
-
   const activateTerminal = useCallback(
     (terminalId: string) => {
       storeSetActiveTerminal(threadRef, terminalId);
@@ -1195,6 +1194,10 @@ function ChatViewContent(props: ChatViewProps) {
   const openTerminal = useAtomCommand(terminalEnvironment.open, "terminal open");
   const writeTerminal = useAtomCommand(terminalEnvironment.write, "terminal write");
   const closeTerminalMutation = useAtomCommand(terminalEnvironment.close, "terminal close");
+  const runCommandQuickAction = useAtomCommand(
+    terminalEnvironment.runCommandQuickAction,
+    "command quick action run",
+  );
   const createThread = useAtomCommand(threadEnvironment.create, { reportFailure: false });
   const deleteThread = useAtomCommand(threadEnvironment.delete, { reportFailure: false });
   const updateThreadMetadata = useAtomCommand(threadEnvironment.updateMetadata, {
@@ -2885,6 +2888,38 @@ function ChatViewContent(props: ChatViewProps) {
     gitCwd,
     storeNewTerminal,
   ]);
+  const handleRunCommandQuickAction = useCallback(
+    async (messageId: MessageId, actionId: string) => {
+      if (!activeThreadRef || !activeThreadId) return;
+      const terminalId = nextTerminalId(allocatableActiveTerminalIds);
+      const result = await runCommandQuickAction({
+        environmentId,
+        input: { threadId: activeThreadId, messageId, actionId, terminalId },
+      });
+      if (result._tag === "Failure" && !isAtomCommandInterrupted(result)) {
+        const error = squashAtomCommandFailure(result);
+        setThreadError(
+          activeThreadId,
+          error instanceof Error ? error.message : "Failed to run command quick action.",
+        );
+        return;
+      }
+      if (result._tag === "Failure") return;
+      storeNewTerminal(activeThreadRef, result.value.terminalId);
+      setTerminalOpen(true);
+      setTerminalFocusRequestId((value) => value + 1);
+    },
+    [
+      activeThreadId,
+      activeThreadRef,
+      allocatableActiveTerminalIds,
+      environmentId,
+      runCommandQuickAction,
+      setTerminalOpen,
+      setThreadError,
+      storeNewTerminal,
+    ],
+  );
   const closeTerminal = useCallback(
     (terminalId: string) => {
       if (!activeThreadId || !activeThreadRef) return;
@@ -6164,6 +6199,7 @@ function ChatViewContent(props: ChatViewProps) {
             <div className="relative flex min-h-0 flex-1 flex-col">
               {/* Messages — LegendList handles virtualization and scrolling internally */}
               <MessagesTimeline
+                commandQuickActionsEnabled={settings.enableCommandQuickActions}
                 agentPanelModel={agentPanelModel}
                 onOpenAgents={addAgentsSurface}
                 key={activeThread.id}
@@ -6183,6 +6219,7 @@ function ChatViewContent(props: ChatViewProps) {
                 activeThreadEnvironmentId={activeThread.environmentId}
                 routeThreadKey={routeThreadKey}
                 onOpenTurnDiff={onOpenTurnDiff}
+                onRunCommandQuickAction={handleRunCommandQuickAction}
                 revertTurnCountByUserMessageId={revertTurnCountByUserMessageId}
                 onRevertUserMessage={onRevertUserMessage}
                 isRevertingCheckpoint={isRevertingCheckpoint}

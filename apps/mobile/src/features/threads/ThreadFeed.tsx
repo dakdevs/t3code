@@ -1,7 +1,13 @@
 import * as Haptics from "expo-haptics";
 import { KeyboardAwareLegendList } from "@legendapp/list/keyboard";
 import { type LegendListRef } from "@legendapp/list/react-native";
-import type { EnvironmentId, MessageId, ThreadId, TurnId } from "@t3tools/contracts";
+import type {
+  EnvironmentId,
+  MessageId,
+  OrchestrationQuickAction,
+  ThreadId,
+  TurnId,
+} from "@t3tools/contracts";
 import { CHAT_LIST_ANCHOR_OFFSET, resolveChatListAnchoredEndSpace } from "@t3tools/shared/chatList";
 import { formatElapsed } from "@t3tools/shared/orchestrationTiming";
 import { SymbolView } from "../../components/AppSymbol";
@@ -131,6 +137,7 @@ function isFreshTimestamp(input: string): boolean {
 }
 
 export interface ThreadFeedProps {
+  readonly commandQuickActionsEnabled: boolean;
   readonly environmentId: EnvironmentId;
   readonly threadId: ThreadId;
   readonly workspaceRoot?: string | null;
@@ -149,6 +156,7 @@ export interface ThreadFeedProps {
   readonly layoutVariant?: LayoutVariant;
   readonly usesAutomaticContentInsets?: boolean;
   readonly onHeaderMaterialVisibilityChange?: (visible: boolean) => void;
+  readonly onRunCommandQuickAction: (messageId: MessageId, actionId: string) => Promise<void>;
   readonly skills?: ReadonlyArray<SelectableMarkdownSkill>;
   /** Non-null when older turns exist beyond the loaded window. */
   readonly loadEarlier?: {
@@ -810,7 +818,10 @@ function useMarkdownStyles(onLinkPress: (href: string) => void): MarkdownStyleSe
 
 function renderFeedEntry(
   info: { item: ThreadFeedEntry; index: number },
-  props: Pick<ThreadFeedProps, "environmentId" | "skills"> & {
+  props: Pick<
+    ThreadFeedProps,
+    "commandQuickActionsEnabled" | "environmentId" | "onRunCommandQuickAction" | "skills"
+  > & {
     readonly copiedRowId: string | null;
     readonly expandedWorkRows: Record<string, boolean>;
     readonly terminalAssistantMessageIds: ReadonlySet<string>;
@@ -993,6 +1004,15 @@ function renderFeedEntry(
             />
           );
         })}
+        {props.commandQuickActionsEnabled &&
+        message.quickActions &&
+        message.quickActions.length > 0 ? (
+          <CommandQuickActions
+            actions={message.quickActions}
+            messageId={message.id}
+            onRun={props.onRunCommandQuickAction}
+          />
+        ) : null}
         {showAssistantMeta ? (
           <View className="mt-1 flex-row items-center gap-1">
             <CopyTextButton
@@ -1022,6 +1042,43 @@ function renderFeedEntry(
     />
   );
 }
+
+const CommandQuickActions = memo(function CommandQuickActions(props: {
+  readonly actions: ReadonlyArray<OrchestrationQuickAction>;
+  readonly messageId: MessageId;
+  readonly onRun: (messageId: MessageId, actionId: string) => Promise<void>;
+}) {
+  const [runningActionId, setRunningActionId] = useState<string | null>(null);
+  const iconColor = useThemeColor("--color-icon");
+
+  return (
+    <View className="mt-3 flex-row flex-wrap gap-2">
+      {props.actions.map((action) => {
+        const running = runningActionId === action.id;
+        return (
+          <Pressable
+            key={action.id}
+            accessibilityRole="button"
+            accessibilityLabel={action.label}
+            disabled={runningActionId !== null}
+            onPress={() => {
+              setRunningActionId(action.id);
+              void props.onRun(props.messageId, action.id).finally(() => setRunningActionId(null));
+            }}
+            className="min-h-10 flex-row items-center gap-2 rounded-xl border border-border bg-card px-3 py-2 disabled:opacity-50"
+          >
+            {running ? (
+              <ActivityIndicator size="small" />
+            ) : (
+              <SymbolView name="terminal" size={15} tintColor={iconColor} type="monochrome" />
+            )}
+            <Text className="font-t3-medium text-sm text-foreground">{action.label}</Text>
+          </Pressable>
+        );
+      })}
+    </View>
+  );
+});
 
 const WorkingTimelineRow = memo(function WorkingTimelineRow(props: { readonly startedAt: string }) {
   const [nowMs, setNowMs] = useState(() => Date.now());
@@ -1761,6 +1818,7 @@ export const ThreadFeed = memo(function ThreadFeed(props: ThreadFeedProps) {
     (info: { item: ThreadFeedEntry; index: number }) =>
       renderFeedEntry(info, {
         environmentId: props.environmentId,
+        commandQuickActionsEnabled: props.commandQuickActionsEnabled,
         copiedRowId,
         expandedWorkRows,
         terminalAssistantMessageIds,
@@ -1778,6 +1836,7 @@ export const ThreadFeed = memo(function ThreadFeed(props: ThreadFeedProps) {
         reviewCommentBubbleWidth,
         userBubbleMaxWidth,
         skills: props.skills,
+        onRunCommandQuickAction: props.onRunCommandQuickAction,
       }),
     [
       copiedRowId,
@@ -1797,6 +1856,8 @@ export const ThreadFeed = memo(function ThreadFeed(props: ThreadFeedProps) {
       onToggleWorkGroup,
       onToggleWorkRow,
       props.environmentId,
+      props.commandQuickActionsEnabled,
+      props.onRunCommandQuickAction,
       props.skills,
     ],
   );

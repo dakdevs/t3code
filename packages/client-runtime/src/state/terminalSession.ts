@@ -81,27 +81,99 @@ function applyTerminalBackspaces(input: string): string {
   return output.join("");
 }
 
-export function formatInlineTerminalOutput(
-  buffer: string,
-  historyOffset: number,
-  maxChars = DEFAULT_MAX_INLINE_TERMINAL_OUTPUT_CHARS,
-): string {
+function normalizeInlineTerminalText(buffer: string, historyOffset: number): string {
   const plain = buffer
     .slice(Math.max(0, historyOffset))
     // CSI and OSC sequences carry terminal presentation, not useful inline text.
     // eslint-disable-next-line no-control-regex
     .replace(/\x1b\[[0-?]*[ -/]*[@-~]|\x1b\].*?(?:\x07|\x1b\\)/gs, "");
-  const output = applyTerminalBackspaces(plain)
-    .replace(/\r\n/g, "\n")
-    .replace(/\r/g, "\n")
-    // Preserve newlines and tabs while dropping remaining terminal controls.
-    // eslint-disable-next-line no-control-regex
-    .replace(/[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]/g, "")
-    .replace(/^\n+|\n+$/g, "");
+  return (
+    applyTerminalBackspaces(plain)
+      .replace(/\r\n/g, "\n")
+      .replace(/\r/g, "\n")
+      // Preserve newlines and tabs while dropping remaining terminal controls.
+      // eslint-disable-next-line no-control-regex
+      .replace(/[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]/g, "")
+      .replace(/^\n+|\n+$/g, "")
+  );
+}
 
+function boundInlineTerminalOutput(output: string, maxChars: number): string {
   if (maxChars <= 0) return "";
   if (output.length <= maxChars) return output;
   return `[Earlier output truncated]\n${output.slice(-maxChars)}`;
+}
+
+function trimQuickActionShellTranscript(
+  output: string,
+  command: string,
+  terminalIdle: boolean,
+): string {
+  let lines = output.split("\n");
+  const commandLead = command
+    .split("\n")
+    .map((line) => line.trim())
+    .find((line) => line.length > 0);
+  if (commandLead !== undefined) {
+    let lastEchoIndex = -1;
+    for (let index = 0; index < Math.min(lines.length, 12); index += 1) {
+      const line = lines[index]?.trim() ?? "";
+      if (line === commandLead || line.endsWith(` ${commandLead}`)) {
+        lastEchoIndex = index;
+      }
+    }
+    if (lastEchoIndex >= 0) {
+      lines = lines.slice(lastEchoIndex + 1);
+    }
+  }
+
+  while (lines[0]?.trim().length === 0) lines.shift();
+  while (lines.at(-1)?.trim().length === 0) lines.pop();
+
+  if (terminalIdle) {
+    const promptLine = lines.at(-1)?.trim() ?? "";
+    const markerOnly = /^[$#>%❯➜]$/.test(promptLine);
+    const looksLikePrompt = markerOnly || /(?:^|\s)[$#>%❯➜]$/.test(promptLine);
+    if (looksLikePrompt) {
+      lines.pop();
+      if (markerOnly) {
+        let decorationIndex = lines.length - 1;
+        while (decorationIndex >= 0 && lines[decorationIndex]?.trim().length === 0) {
+          decorationIndex -= 1;
+        }
+        if (decorationIndex > 0 && lines[decorationIndex - 1]?.trim().length === 0) {
+          lines.length = decorationIndex - 1;
+        }
+      }
+      while (lines.at(-1)?.trim().length === 0) lines.pop();
+    }
+  }
+
+  return lines.join("\n");
+}
+
+export function formatInlineTerminalOutput(
+  buffer: string,
+  historyOffset: number,
+  maxChars = DEFAULT_MAX_INLINE_TERMINAL_OUTPUT_CHARS,
+): string {
+  return boundInlineTerminalOutput(normalizeInlineTerminalText(buffer, historyOffset), maxChars);
+}
+
+export function formatInlineQuickActionOutput(
+  buffer: string,
+  historyOffset: number,
+  options: {
+    readonly command: string;
+    readonly terminalIdle: boolean;
+    readonly maxChars?: number;
+  },
+): string {
+  const output = normalizeInlineTerminalText(buffer, historyOffset);
+  return boundInlineTerminalOutput(
+    trimQuickActionShellTranscript(output, options.command, options.terminalIdle),
+    options.maxChars ?? DEFAULT_MAX_INLINE_TERMINAL_OUTPUT_CHARS,
+  );
 }
 
 function trimBufferToBytes(buffer: string, maxBufferBytes: number): string {

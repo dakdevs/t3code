@@ -9,7 +9,7 @@ import type {
   ThreadId,
   TurnId,
 } from "@t3tools/contracts";
-import { formatInlineTerminalOutput } from "@t3tools/client-runtime/state/terminal";
+import { formatInlineQuickActionOutput } from "@t3tools/client-runtime/state/terminal";
 import { CHAT_LIST_ANCHOR_OFFSET, resolveChatListAnchoredEndSpace } from "@t3tools/shared/chatList";
 import { formatElapsed } from "@t3tools/shared/orchestrationTiming";
 import { SymbolView } from "../../components/AppSymbol";
@@ -1106,14 +1106,19 @@ const InlineCommandQuickAction = memo(function InlineCommandQuickAction(props: {
     terminal:
       execution === null ? null : { threadId: props.threadId, terminalId: execution.terminalId },
   });
-  const output =
-    execution === null ? "" : formatInlineTerminalOutput(terminal.buffer, execution.historyOffset);
   const status =
     terminal.error !== null || terminal.status === "error"
       ? "error"
       : terminal.hasRunningSubprocess || terminal.version === 0
         ? "running"
         : "finished";
+  const output =
+    execution === null
+      ? ""
+      : formatInlineQuickActionOutput(terminal.buffer, execution.historyOffset, {
+          command: props.action.command,
+          terminalIdle: status !== "running",
+        });
 
   useEffect(() => {
     outputScrollRef.current?.scrollToEnd({ animated: false });

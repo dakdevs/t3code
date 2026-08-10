@@ -7,6 +7,7 @@ import {
   applyTerminalMetadataStreamEvent,
   combineTerminalSessionState,
   EMPTY_TERMINAL_BUFFER_STATE,
+  formatInlineQuickActionOutput,
   formatInlineTerminalOutput,
   selectRunningSubprocessTerminalIds,
 } from "./terminalSession.ts";
@@ -48,6 +49,29 @@ describe("terminal session reducers", () => {
     const raw = "\u001b[?2004hg\bgit pull\u001b[?2004l\r\nAlready up to date.\r\n";
 
     expect(formatInlineTerminalOutput(raw, 0)).toBe("git pull\nAlready up to date.");
+  });
+
+  it("keeps quick-action output while removing command echoes and the next shell prompt", () => {
+    const raw = [
+      "git pull\r\n",
+      "\r\u001b[1;33mcloud branch repo\u001b[0m\r\n",
+      "\u001b[1;32m$\u001b[0m \u001b[?2004hg\bgit pull\u001b[?2004l\r\r\n",
+      "Already up to date.\r\n",
+      "\r\u001b[1;33mcloud branch repo\u001b[0m\r\n",
+      "\u001b[1;32m$\u001b[0m \u001b[?2004h",
+    ].join("");
+
+    expect(formatInlineQuickActionOutput(raw, 0, { command: "git pull", terminalIdle: true })).toBe(
+      "Already up to date.",
+    );
+  });
+
+  it("does not trim a trailing prompt-looking line while the command is still running", () => {
+    const raw = "git pull\r\nDownloading 100 %\r\n";
+
+    expect(
+      formatInlineQuickActionOutput(raw, 0, { command: "git pull", terminalIdle: false }),
+    ).toBe("Downloading 100 %");
   });
 
   it("prefers live attach status over stale metadata after the attach stream starts", () => {

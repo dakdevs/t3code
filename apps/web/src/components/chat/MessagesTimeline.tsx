@@ -8,7 +8,7 @@ import {
   type TurnId,
 } from "@t3tools/contracts";
 import { parseScopedThreadKey } from "@t3tools/client-runtime/environment";
-import { formatInlineTerminalOutput } from "@t3tools/client-runtime/state/terminal";
+import { formatInlineQuickActionOutput } from "@t3tools/client-runtime/state/terminal";
 import type { AgentPanelModel } from "@t3tools/client-runtime/state/subagentRuntime";
 import {
   emptyAgentPanelModel,
@@ -1209,14 +1209,19 @@ function InlineCommandQuickAction({
             terminalId: execution.terminalId,
           },
   });
-  const output =
-    execution === null ? "" : formatInlineTerminalOutput(terminal.buffer, execution.historyOffset);
   const status =
     terminal.error !== null || terminal.status === "error"
       ? "error"
       : terminal.hasRunningSubprocess || terminal.version === 0
         ? "running"
         : "finished";
+  const output =
+    execution === null
+      ? ""
+      : formatInlineQuickActionOutput(terminal.buffer, execution.historyOffset, {
+          command: action.command,
+          terminalIdle: status !== "running",
+        });
 
   useEffect(() => {
     const element = outputRef.current;

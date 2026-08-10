@@ -133,10 +133,11 @@ function trimQuickActionShellTranscript(
   if (terminalIdle) {
     const promptLine = lines.at(-1)?.trim() ?? "";
     const markerOnly = /^[$#>%❯➜]$/.test(promptLine);
-    const looksLikePrompt = markerOnly || /(?:^|\s)[$#>%❯➜]$/.test(promptLine);
+    const promptWithInput = /^[$#>%❯➜]\s+\S/.test(promptLine);
+    const looksLikePrompt = markerOnly || promptWithInput || /(?:^|\s)[$#>%❯➜]$/.test(promptLine);
     if (looksLikePrompt) {
       lines.pop();
-      if (markerOnly) {
+      if (markerOnly || promptWithInput) {
         let decorationIndex = lines.length - 1;
         while (decorationIndex >= 0 && lines[decorationIndex]?.trim().length === 0) {
           decorationIndex -= 1;

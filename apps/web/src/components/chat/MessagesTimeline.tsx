@@ -51,6 +51,7 @@ import ChatMarkdown from "../ChatMarkdown";
 import type {
   CommandQuickActionExecutionStatus,
   CommandQuickActionOutputRenderProps,
+  CommandQuickActionRenderState,
 } from "../ChatMarkdown";
 import {
   BotIcon,
@@ -1139,9 +1140,53 @@ function TurnFoldTimelineRow({ row }: { row: Extract<TimelineRow, { kind: "turn-
 function AssistantTimelineRow({ row }: { row: Extract<TimelineRow, { kind: "message" }> }) {
   const ctx = use(TimelineRowCtx);
   const messageText = row.message.text || (row.message.streaming ? "" : "(empty response)");
+  const activeQuickActionIdsRef = useRef(new Set<string>());
+  const [commandQuickActionStates, setCommandQuickActionStates] = useState<
+    Record<string, CommandQuickActionRenderState>
+  >({});
   const runCommandQuickAction = useCallback(
-    (action: OrchestrationQuickAction) => ctx.onRunCommandQuickAction(row.message.id, action.id),
+    (action: OrchestrationQuickAction) => {
+      if (activeQuickActionIdsRef.current.has(action.id)) return;
+      activeQuickActionIdsRef.current.add(action.id);
+      setCommandQuickActionStates((current) => ({
+        ...current,
+        [action.id]: { status: "starting", execution: null },
+      }));
+      void ctx
+        .onRunCommandQuickAction(row.message.id, action.id)
+        .then((execution) => {
+          if (execution === null) {
+            activeQuickActionIdsRef.current.delete(action.id);
+            setCommandQuickActionStates((current) => ({
+              ...current,
+              [action.id]: { status: "idle", execution: null },
+            }));
+            return;
+          }
+          setCommandQuickActionStates((current) => ({
+            ...current,
+            [action.id]: { status: "running", execution },
+          }));
+        })
+        .catch(() => {
+          activeQuickActionIdsRef.current.delete(action.id);
+          setCommandQuickActionStates((current) => ({
+            ...current,
+            [action.id]: { status: "idle", execution: null },
+          }));
+        });
+    },
     [ctx, row.message.id],
+  );
+  const onCommandQuickActionStatusChange = useCallback(
+    (actionId: string, status: CommandQuickActionExecutionStatus) => {
+      setCommandQuickActionStates((current) => {
+        const state = current[actionId];
+        if (state === undefined || state.status === status) return current;
+        return { ...current, [actionId]: { ...state, status } };
+      });
+    },
+    [],
   );
   const renderCommandQuickActionOutput = useCallback(
     (props: CommandQuickActionOutputRenderProps) => <InlineCommandQuickActionOutput {...props} />,
@@ -1160,7 +1205,9 @@ function AssistantTimelineRow({ row }: { row: Extract<TimelineRow, { kind: "mess
           isStreaming={Boolean(row.message.streaming)}
           skills={ctx.skills}
           commandQuickActions={commandQuickActions ?? []}
+          commandQuickActionStates={commandQuickActionStates}
           onRunCommandQuickAction={runCommandQuickAction}
+          onCommandQuickActionStatusChange={onCommandQuickActionStatusChange}
           renderCommandQuickActionOutput={renderCommandQuickActionOutput}
         />
         <AssistantChangedFilesSection
@@ -1214,10 +1261,13 @@ function InlineCommandQuickActionOutput({
       : terminal.hasRunningSubprocess || terminal.version === 0
         ? "running"
         : "finished";
-  const output = formatInlineQuickActionOutput(terminal.buffer, execution.historyOffset, {
-    command: action.command,
-    terminalIdle: status !== "running",
-  });
+  const output =
+    terminal.version === 0
+      ? ""
+      : formatInlineQuickActionOutput(terminal.buffer, execution.historyOffset, {
+          command: action.command,
+          terminalIdle: status !== "running",
+        });
 
   useEffect(() => {
     onStatusChange(status satisfies CommandQuickActionExecutionStatus);

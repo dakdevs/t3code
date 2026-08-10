@@ -74,6 +74,14 @@ describe("terminal session reducers", () => {
     ).toBe("Downloading 100 %");
   });
 
+  it("removes an entered command at the next shell prompt after completion", () => {
+    const raw = "git pull\r\nAlready up to date.\r\n$ ggit pull\r\n";
+
+    expect(formatInlineQuickActionOutput(raw, 0, { command: "git pull", terminalIdle: true })).toBe(
+      "Already up to date.",
+    );
+  });
+
   it("prefers live attach status over stale metadata after the attach stream starts", () => {
     const summary = applyTerminalMetadataStreamEvent([], {
       type: "snapshot",

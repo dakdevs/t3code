@@ -268,6 +268,13 @@ type MarkdownCodeBlockAppearance = Pick<
   | "theme"
 >;
 
+type MobileCommandQuickActionStatus = "idle" | "starting" | "running" | "finished" | "error";
+
+type MobileCommandQuickActionState = {
+  readonly status: MobileCommandQuickActionStatus;
+  readonly execution: CommandQuickActionRunResult | null;
+};
+
 interface ReviewCommentColors {
   readonly background: ColorValue;
   readonly border: ColorValue;
@@ -341,18 +348,19 @@ function MarkdownCodeBlock(props: {
   readonly textColor: string;
   readonly theme: ReviewDiffTheme;
   readonly quickAction?: OrchestrationQuickAction;
+  readonly quickActionState?: MobileCommandQuickActionState;
   readonly environmentId?: EnvironmentId;
-  readonly messageId?: MessageId;
-  readonly onRunQuickAction?: (
-    messageId: MessageId,
+  readonly onRunQuickAction?: (action: OrchestrationQuickAction) => void;
+  readonly onQuickActionStatusChange?: (
     actionId: string,
-  ) => Promise<CommandQuickActionRunResult | null>;
+    status: "running" | "finished" | "error",
+  ) => void;
   readonly threadId?: ThreadId;
 }) {
   const content = props.content.replace(/\n$/, "");
   const languageLabel = props.language?.trim() || "text";
-  const [starting, setStarting] = useState(false);
-  const [execution, setExecution] = useState<CommandQuickActionRunResult | null>(null);
+  const quickActionStatus = props.quickActionState?.status ?? "idle";
+  const execution = props.quickActionState?.execution ?? null;
   const outputScrollRef = useRef<ScrollView>(null);
   const highlighted = useMarkdownCodeHighlight({
     code: content,
@@ -374,38 +382,23 @@ function MarkdownCodeBlock(props: {
         ? "running"
         : "finished";
   const output =
-    execution === null || props.quickAction === undefined
+    execution === null || props.quickAction === undefined || terminal.version === 0
       ? ""
       : formatInlineQuickActionOutput(terminal.buffer, execution.historyOffset, {
           command: props.quickAction.command,
           terminalIdle: status !== "running",
         });
-  const loading = starting || (execution !== null && status === "running");
+  const loading = quickActionStatus === "starting" || quickActionStatus === "running";
   let tokenOffset = 0;
 
   useEffect(() => {
     outputScrollRef.current?.scrollToEnd({ animated: false });
   }, [output]);
 
-  const runQuickAction = useCallback(() => {
-    if (
-      props.quickAction === undefined ||
-      props.messageId === undefined ||
-      props.onRunQuickAction === undefined ||
-      starting ||
-      execution !== null
-    ) {
-      return;
-    }
-    setStarting(true);
-    void props
-      .onRunQuickAction(props.messageId, props.quickAction.id)
-      .then((result) => {
-        if (result !== null) setExecution(result);
-      })
-      .catch(() => undefined)
-      .finally(() => setStarting(false));
-  }, [execution, props, starting]);
+  useEffect(() => {
+    if (execution === null || props.quickAction === undefined) return;
+    props.onQuickActionStatusChange?.(props.quickAction.id, status);
+  }, [execution, props.onQuickActionStatusChange, props.quickAction, status]);
 
   return (
     <View
@@ -434,15 +427,17 @@ function MarkdownCodeBlock(props: {
               accessibilityLabel={
                 loading
                   ? `Running ${props.quickAction.command}`
-                  : execution === null
+                  : quickActionStatus === "idle"
                     ? `Run ${props.quickAction.command}`
                     : status === "error"
                       ? `Failed ${props.quickAction.command}`
                       : `Finished ${props.quickAction.command}`
               }
-              accessibilityState={{ disabled: starting || execution !== null }}
-              disabled={starting || execution !== null}
-              onPress={runQuickAction}
+              accessibilityState={{ disabled: quickActionStatus !== "idle" }}
+              disabled={quickActionStatus !== "idle"}
+              onPress={() => {
+                if (props.quickAction !== undefined) props.onRunQuickAction?.(props.quickAction);
+              }}
               className="size-8 items-center justify-center rounded-lg disabled:opacity-60"
               hitSlop={4}
             >
@@ -451,7 +446,11 @@ function MarkdownCodeBlock(props: {
               ) : (
                 <SymbolView
                   name={
-                    execution === null ? "play.fill" : status === "error" ? "xmark" : "checkmark"
+                    quickActionStatus === "idle"
+                      ? "play.fill"
+                      : status === "error"
+                        ? "xmark"
+                        : "checkmark"
                   }
                   size={15}
                   tintColor={props.copyTintColor}
@@ -994,12 +993,13 @@ function useMarkdownStyles(onLinkPress: (href: string) => void): MarkdownStyleSe
 type AssistantMessageCodeBlockContext = {
   readonly environmentId: EnvironmentId;
   readonly markdownStyles: MarkdownStyleSet;
-  readonly messageId: MessageId;
-  readonly onRunQuickAction: (
-    messageId: MessageId,
+  readonly onRunQuickAction: (action: OrchestrationQuickAction) => void;
+  readonly onQuickActionStatusChange: (
     actionId: string,
-  ) => Promise<CommandQuickActionRunResult | null>;
+    status: "running" | "finished" | "error",
+  ) => void;
   readonly quickActions: ReadonlyArray<OrchestrationQuickAction>;
+  readonly quickActionStates: Readonly<Record<string, MobileCommandQuickActionState>>;
   readonly threadId: ThreadId;
 };
 
@@ -1018,9 +1018,12 @@ function renderAssistantMessageCodeBlock(
       content={content}
       environmentId={context.environmentId}
       language={language}
-      messageId={context.messageId}
       onRunQuickAction={context.onRunQuickAction}
+      onQuickActionStatusChange={context.onQuickActionStatusChange}
       {...(quickAction === undefined ? {} : { quickAction })}
+      {...(quickAction === undefined || context.quickActionStates[quickAction.id] === undefined
+        ? {}
+        : { quickActionState: context.quickActionStates[quickAction.id] })}
       threadId={context.threadId}
     />
   );
@@ -1040,15 +1043,64 @@ const AssistantMessageMarkdown = memo(function AssistantMessageMarkdown(props: {
   readonly text: string;
   readonly threadId: ThreadId;
 }) {
+  const activeQuickActionIdsRef = useRef(new Set<string>());
+  const [quickActionStates, setQuickActionStates] = useState<
+    Record<string, MobileCommandQuickActionState>
+  >({});
+  const runQuickAction = useCallback(
+    (action: OrchestrationQuickAction) => {
+      if (activeQuickActionIdsRef.current.has(action.id)) return;
+      activeQuickActionIdsRef.current.add(action.id);
+      setQuickActionStates((current) => ({
+        ...current,
+        [action.id]: { status: "starting", execution: null },
+      }));
+      void props
+        .onRunQuickAction(props.messageId, action.id)
+        .then((execution) => {
+          if (execution === null) {
+            activeQuickActionIdsRef.current.delete(action.id);
+            setQuickActionStates((current) => ({
+              ...current,
+              [action.id]: { status: "idle", execution: null },
+            }));
+            return;
+          }
+          setQuickActionStates((current) => ({
+            ...current,
+            [action.id]: { status: "running", execution },
+          }));
+        })
+        .catch(() => {
+          activeQuickActionIdsRef.current.delete(action.id);
+          setQuickActionStates((current) => ({
+            ...current,
+            [action.id]: { status: "idle", execution: null },
+          }));
+        });
+    },
+    [props.messageId, props.onRunQuickAction],
+  );
+  const onQuickActionStatusChange = useCallback(
+    (actionId: string, status: "running" | "finished" | "error") => {
+      setQuickActionStates((current) => {
+        const state = current[actionId];
+        if (state === undefined || state.status === status) return current;
+        return { ...current, [actionId]: { ...state, status } };
+      });
+    },
+    [],
+  );
   const renderers = useMemo<CustomRenderers>(() => {
     if ((props.quickActions?.length ?? 0) === 0) return props.markdownStyles.renderers;
 
     const context: AssistantMessageCodeBlockContext = {
       environmentId: props.environmentId,
       markdownStyles: props.markdownStyles,
-      messageId: props.messageId,
-      onRunQuickAction: props.onRunQuickAction,
+      onRunQuickAction: runQuickAction,
+      onQuickActionStatusChange,
       quickActions: props.quickActions ?? [],
+      quickActionStates,
       threadId: props.threadId,
     };
     return {
@@ -1058,10 +1110,11 @@ const AssistantMessageMarkdown = memo(function AssistantMessageMarkdown(props: {
   }, [
     props.environmentId,
     props.markdownStyles,
-    props.messageId,
-    props.onRunQuickAction,
     props.quickActions,
     props.threadId,
+    quickActionStates,
+    runQuickAction,
+    onQuickActionStatusChange,
   ]);
 
   if ((props.quickActions?.length ?? 0) === 0 && hasNativeSelectableMarkdownText()) {

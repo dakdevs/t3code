@@ -2,6 +2,7 @@ import { expect, it, vi } from "@effect/vitest";
 import {
   COMMAND_QUICK_ACTION_COMPLETION_MARKER,
   COMMAND_QUICK_ACTION_INPUT_REQUIRED_MARKER,
+  COMMAND_QUICK_ACTION_START_MARKER,
   DEFAULT_PROVIDER_INTERACTION_MODE,
   MessageId,
   ProjectId,
@@ -102,6 +103,7 @@ it("builds a POSIX job-control wrapper without changing the stored command", () 
   expect(input).toContain("set -m");
   expect(input).toContain('wait "$p"');
   expect(input).toContain("jobs -s -p");
+  expect(input).toContain(COMMAND_QUICK_ACTION_START_MARKER);
   expect(input).toContain(COMMAND_QUICK_ACTION_INPUT_REQUIRED_MARKER);
   expect(input).toContain(COMMAND_QUICK_ACTION_COMPLETION_MARKER);
   expect(input).toContain("T3_CODE_QUICK_ACTION='printf '\"'\"'%s\\n'\"'\"' \"$USER\"'");
@@ -224,7 +226,7 @@ it.effect("runs the stored command exactly and exposes output only to a later me
   let hasRunningSubprocess = false;
   let commandStarted = false;
   const write = vi.fn(({ data }: { readonly data: string }) => {
-    history += `${data}ok\r\n`;
+    history += `${data}${COMMAND_QUICK_ACTION_START_MARKER}\r\nok\r\n`;
     commandStarted = true;
     hasRunningSubprocess = true;
     return Effect.void;

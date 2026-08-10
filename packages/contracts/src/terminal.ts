@@ -15,6 +15,9 @@ export const COMMAND_QUICK_ACTION_COMPLETION_MARKER = "__T3_CODE_QUICK_ACTION_CO
 export const COMMAND_QUICK_ACTION_INPUT_REQUIRED_MARKER =
   "__T3_CODE_QUICK_ACTION_INPUT_REQUIRED__:";
 
+/** Printed immediately before a quick action starts producing command output. */
+export const COMMAND_QUICK_ACTION_START_MARKER = "__T3_CODE_QUICK_ACTION_START__";
+
 const TrimmedNonEmptyStringSchema = TrimmedNonEmptyString;
 const TerminalColsSchema = Schema.Int.check(Schema.isGreaterThanOrEqualTo(1)).check(
   Schema.isLessThanOrEqualTo(1000),

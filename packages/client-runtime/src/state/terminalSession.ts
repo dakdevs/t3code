@@ -1,6 +1,7 @@
 import {
   COMMAND_QUICK_ACTION_COMPLETION_MARKER,
   COMMAND_QUICK_ACTION_INPUT_REQUIRED_MARKER,
+  COMMAND_QUICK_ACTION_START_MARKER,
   type EnvironmentId,
   type TerminalAttachStreamEvent,
   type TerminalMetadataStreamEvent,
@@ -119,27 +120,34 @@ function trimQuickActionShellTranscript(
   terminalIdle: boolean,
 ): string {
   let lines = output.split("\n");
-  const commandLead = command
-    .split("\n")
-    .map((line) => line.trim())
-    .find((line) => line.length > 0);
-  if (commandLead !== undefined) {
-    let lastEchoIndex = -1;
-    for (let index = 0; index < Math.min(lines.length, 12); index += 1) {
-      const line = lines[index]?.trim() ?? "";
-      if (line === commandLead || line.endsWith(` ${commandLead}`)) {
-        lastEchoIndex = index;
+  const outputStartIndex = lines.findLastIndex(
+    (line) => line.trim() === COMMAND_QUICK_ACTION_START_MARKER,
+  );
+  if (outputStartIndex >= 0) {
+    lines = lines.slice(outputStartIndex + 1);
+  } else {
+    const commandLead = command
+      .split("\n")
+      .map((line) => line.trim())
+      .find((line) => line.length > 0);
+    if (commandLead !== undefined) {
+      let lastEchoIndex = -1;
+      for (let index = 0; index < Math.min(lines.length, 12); index += 1) {
+        const line = lines[index]?.trim() ?? "";
+        if (line === commandLead || line.endsWith(` ${commandLead}`)) {
+          lastEchoIndex = index;
+        }
+        if (
+          line.includes(COMMAND_QUICK_ACTION_COMPLETION_MARKER) &&
+          !line.startsWith(COMMAND_QUICK_ACTION_COMPLETION_MARKER)
+        ) {
+          lastEchoIndex = index;
+        }
       }
-      if (
-        line.includes(COMMAND_QUICK_ACTION_COMPLETION_MARKER) &&
-        !line.startsWith(COMMAND_QUICK_ACTION_COMPLETION_MARKER)
-      ) {
-        lastEchoIndex = index;
+      if (lastEchoIndex >= 0) {
+        lines = lines.slice(lastEchoIndex + 1);
+        if (/^["']+$/.test(lines[0]?.trim() ?? "")) lines.shift();
       }
-    }
-    if (lastEchoIndex >= 0) {
-      lines = lines.slice(lastEchoIndex + 1);
-      if (/^["']+$/.test(lines[0]?.trim() ?? "")) lines.shift();
     }
   }
 

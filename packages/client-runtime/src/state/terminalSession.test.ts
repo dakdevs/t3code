@@ -107,6 +107,25 @@ describe("terminal session reducers", () => {
     );
   });
 
+  it("removes every shell redraw fragment before quick-action output starts", () => {
+    const raw = [
+      `if command -v bash;then printf '\\n__T3_CODE_QUICK_ACTION_COMPLETE__:%s\\n' "$s"\r\n`,
+      "n\r\n",
+      "n';fi\r\n",
+      "__T3_CODE_QUICK_ACTION_START__\r\n",
+      "chore/upgrade-all-dependencies\r\n",
+      `${COMMAND_QUICK_ACTION_COMPLETION_MARKER}0\r\n`,
+      "$ ",
+    ].join("");
+
+    expect(
+      formatInlineQuickActionOutput(raw, 0, {
+        command: "git branch --show-current",
+        terminalIdle: true,
+      }),
+    ).toBe("chore/upgrade-all-dependencies");
+  });
+
   it("does not report quick-action completion before the marker arrives", () => {
     expect(readInlineQuickActionCompletion("git pull\r\nDownloading...", 0)).toBeNull();
   });

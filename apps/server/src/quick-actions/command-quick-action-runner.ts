@@ -1,6 +1,7 @@
 import {
   COMMAND_QUICK_ACTION_COMPLETION_MARKER,
   COMMAND_QUICK_ACTION_INPUT_REQUIRED_MARKER,
+  COMMAND_QUICK_ACTION_START_MARKER,
   CommandQuickActionRunError,
   type CommandQuickActionRunInput,
   type CommandQuickActionRunResult,
@@ -27,7 +28,8 @@ function quoteShellWord(value: string): string {
 
 export function buildCommandQuickActionShellInput(command: string): string {
   const supervisor =
-    `set -m;eval "$T3_CODE_QUICK_ACTION" & p=$!;wait "$p";s=$?;` +
+    `set -m;printf '\\n${COMMAND_QUICK_ACTION_START_MARKER}\\n';` +
+    `eval "$T3_CODE_QUICK_ACTION" & p=$!;wait "$p";s=$?;` +
     `if [ "$(jobs -s -p)" = "$p" ];then ` +
     `signal="$(kill -l "$s" 2>/dev/null || printf STOP)";` +
     `printf '\\n${COMMAND_QUICK_ACTION_INPUT_REQUIRED_MARKER}%s\\n' "$signal";` +
@@ -44,14 +46,21 @@ export function buildCommandQuickActionShellInput(command: string): string {
 
 function formatTerminalContext(label: string, output: string): string {
   let lines = output.replace(/\r\n/g, "\n").split("\n");
-  const wrapperEchoIndex = lines.findIndex(
-    (line) =>
-      line.includes(COMMAND_QUICK_ACTION_COMPLETION_MARKER) &&
-      !line.trim().startsWith(COMMAND_QUICK_ACTION_COMPLETION_MARKER),
+  const outputStartIndex = lines.findLastIndex(
+    (line) => line.trim() === COMMAND_QUICK_ACTION_START_MARKER,
   );
-  if (wrapperEchoIndex >= 0) {
-    lines = lines.slice(wrapperEchoIndex + 1);
-    if (/^["']+$/.test(lines[0]?.trim() ?? "")) lines.shift();
+  if (outputStartIndex >= 0) {
+    lines = lines.slice(outputStartIndex + 1);
+  } else {
+    const wrapperEchoIndex = lines.findIndex(
+      (line) =>
+        line.includes(COMMAND_QUICK_ACTION_COMPLETION_MARKER) &&
+        !line.trim().startsWith(COMMAND_QUICK_ACTION_COMPLETION_MARKER),
+    );
+    if (wrapperEchoIndex >= 0) {
+      lines = lines.slice(wrapperEchoIndex + 1);
+      if (/^["']+$/.test(lines[0]?.trim() ?? "")) lines.shift();
+    }
   }
   const normalized = lines
     .filter(

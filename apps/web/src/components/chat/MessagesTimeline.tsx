@@ -1,11 +1,17 @@
 import {
+  type CommandQuickActionRunResult,
   type EnvironmentId,
   type MessageId,
+  type OrchestrationQuickAction,
   type ScopedThreadRef,
   type ServerProviderSkill,
   type TurnId,
 } from "@t3tools/contracts";
 import { parseScopedThreadKey } from "@t3tools/client-runtime/environment";
+import {
+  formatInlineQuickActionOutput,
+  resolveInlineQuickActionExecution,
+} from "@t3tools/client-runtime/state/terminal";
 import type { AgentPanelModel } from "@t3tools/client-runtime/state/subagentRuntime";
 import {
   emptyAgentPanelModel,
@@ -45,6 +51,11 @@ import {
   resolveFileDiffPath,
 } from "../../lib/diffRendering";
 import ChatMarkdown from "../ChatMarkdown";
+import type {
+  CommandQuickActionExecutionStatus,
+  CommandQuickActionOutputRenderProps,
+  CommandQuickActionRenderState,
+} from "../ChatMarkdown";
 import {
   BotIcon,
   CheckIcon,
@@ -66,6 +77,7 @@ import {
   ZapIcon,
 } from "lucide-react";
 import { Button } from "../ui/button";
+import { useAttachedTerminalSession } from "../../state/terminalSessions";
 import { buildExpandedImagePreview, ExpandedImagePreview } from "./ExpandedImagePreview";
 import { ProposedPlanCard } from "./ProposedPlanCard";
 import { ChangedFilesCard } from "./ChangedFilesTree";
@@ -129,6 +141,7 @@ import {
 // ---------------------------------------------------------------------------
 
 interface TimelineRowSharedState {
+  commandQuickActionsEnabled: boolean;
   timestampFormat: TimestampFormat;
   routeThreadKey: string;
   threadRef: ScopedThreadRef | null;
@@ -140,6 +153,11 @@ interface TimelineRowSharedState {
   onRevertUserMessage: (messageId: MessageId) => void;
   onImageExpand: (preview: ExpandedImagePreview) => void;
   onOpenTurnDiff: (turnId: TurnId, filePath?: string) => void;
+  onRunCommandQuickAction: (
+    messageId: MessageId,
+    actionId: string,
+  ) => Promise<CommandQuickActionRunResult | null>;
+  onOpenCommandQuickActionTerminal: (terminalId: string) => void;
   onToggleTurnFold: (turnId: TurnId) => void;
   onToggleWorkGroup: (groupId: string, anchorKey: string) => void;
   agentPanelModel: AgentPanelModel;
@@ -202,6 +220,7 @@ const TIMELINE_MAINTAIN_SCROLL_AT_END = {
 // ---------------------------------------------------------------------------
 
 interface MessagesTimelineProps {
+  commandQuickActionsEnabled: boolean;
   agentPanelModel?: AgentPanelModel;
   onOpenAgents?: () => void;
   isWorking: boolean;
@@ -215,6 +234,11 @@ interface MessagesTimelineProps {
   turnDiffSummaryByAssistantMessageId: Map<MessageId, TurnDiffSummary>;
   routeThreadKey: string;
   onOpenTurnDiff: (turnId: TurnId, filePath?: string) => void;
+  onRunCommandQuickAction: (
+    messageId: MessageId,
+    actionId: string,
+  ) => Promise<CommandQuickActionRunResult | null>;
+  onOpenCommandQuickActionTerminal: (terminalId: string) => void;
   revertTurnCountByUserMessageId: Map<MessageId, number>;
   onRevertUserMessage: (messageId: MessageId) => void;
   isRevertingCheckpoint: boolean;
@@ -248,6 +272,7 @@ interface MessagesTimelineProps {
 // ---------------------------------------------------------------------------
 
 export const MessagesTimeline = memo(function MessagesTimeline({
+  commandQuickActionsEnabled,
   isWorking,
   workingStepLabel = null,
   activeTurnInProgress,
@@ -261,6 +286,8 @@ export const MessagesTimeline = memo(function MessagesTimeline({
   turnDiffSummaryByAssistantMessageId,
   routeThreadKey,
   onOpenTurnDiff,
+  onRunCommandQuickAction,
+  onOpenCommandQuickActionTerminal,
   revertTurnCountByUserMessageId,
   onRevertUserMessage,
   isRevertingCheckpoint,
@@ -511,8 +538,11 @@ export const MessagesTimeline = memo(function MessagesTimeline({
       skills,
       activeThreadEnvironmentId,
       onRevertUserMessage,
+      commandQuickActionsEnabled,
       onImageExpand,
       onOpenTurnDiff,
+      onRunCommandQuickAction,
+      onOpenCommandQuickActionTerminal,
       onToggleTurnFold,
       onToggleWorkGroup,
       agentPanelModel,
@@ -527,8 +557,11 @@ export const MessagesTimeline = memo(function MessagesTimeline({
       skills,
       activeThreadEnvironmentId,
       onRevertUserMessage,
+      commandQuickActionsEnabled,
       onImageExpand,
       onOpenTurnDiff,
+      onRunCommandQuickAction,
+      onOpenCommandQuickActionTerminal,
       onToggleTurnFold,
       onToggleWorkGroup,
       agentPanelModel,
@@ -1110,6 +1143,86 @@ function TurnFoldTimelineRow({ row }: { row: Extract<TimelineRow, { kind: "turn-
 function AssistantTimelineRow({ row }: { row: Extract<TimelineRow, { kind: "message" }> }) {
   const ctx = use(TimelineRowCtx);
   const messageText = row.message.text || (row.message.streaming ? "" : "(empty response)");
+  const activeQuickActionIdsRef = useRef(new Set<string>());
+  const [commandQuickActionStates, setCommandQuickActionStates] = useState<
+    Record<string, CommandQuickActionRenderState>
+  >(() =>
+    Object.fromEntries(
+      (row.message.quickActions ?? []).flatMap((action) =>
+        action.execution === undefined
+          ? []
+          : [[action.id, { status: "running" as const, execution: action.execution }]],
+      ),
+    ),
+  );
+  useEffect(() => {
+    setCommandQuickActionStates((current) => {
+      let next = current;
+      for (const action of row.message.quickActions ?? []) {
+        if (action.execution === undefined) continue;
+        const existing = current[action.id]?.execution;
+        if (
+          existing?.terminalId === action.execution.terminalId &&
+          existing.historyOffset === action.execution.historyOffset
+        ) {
+          continue;
+        }
+        if (next === current) next = { ...current };
+        next[action.id] = { status: "running", execution: action.execution };
+      }
+      return next;
+    });
+  }, [row.message.quickActions]);
+  const runCommandQuickAction = useCallback(
+    (action: OrchestrationQuickAction) => {
+      if (activeQuickActionIdsRef.current.has(action.id)) return;
+      activeQuickActionIdsRef.current.add(action.id);
+      setCommandQuickActionStates((current) => ({
+        ...current,
+        [action.id]: { status: "starting", execution: null },
+      }));
+      void ctx
+        .onRunCommandQuickAction(row.message.id, action.id)
+        .then((execution) => {
+          if (execution === null) {
+            activeQuickActionIdsRef.current.delete(action.id);
+            setCommandQuickActionStates((current) => ({
+              ...current,
+              [action.id]: { status: "idle", execution: null },
+            }));
+            return;
+          }
+          setCommandQuickActionStates((current) => ({
+            ...current,
+            [action.id]: { status: "running", execution },
+          }));
+        })
+        .catch(() => {
+          activeQuickActionIdsRef.current.delete(action.id);
+          setCommandQuickActionStates((current) => ({
+            ...current,
+            [action.id]: { status: "idle", execution: null },
+          }));
+        });
+    },
+    [ctx, row.message.id],
+  );
+  const onCommandQuickActionStatusChange = useCallback(
+    (actionId: string, status: CommandQuickActionExecutionStatus) => {
+      setCommandQuickActionStates((current) => {
+        const state = current[actionId];
+        if (state === undefined || state.status === status) return current;
+        return { ...current, [actionId]: { ...state, status } };
+      });
+    },
+    [],
+  );
+  const renderCommandQuickActionOutput = useCallback(
+    (props: CommandQuickActionOutputRenderProps) => <InlineCommandQuickActionOutput {...props} />,
+    [],
+  );
+  const commandQuickActions =
+    ctx.commandQuickActionsEnabled && !row.message.streaming ? row.message.quickActions : undefined;
 
   return (
     <>
@@ -1120,6 +1233,11 @@ function AssistantTimelineRow({ row }: { row: Extract<TimelineRow, { kind: "mess
           threadRef={ctx.threadRef ?? undefined}
           isStreaming={Boolean(row.message.streaming)}
           skills={ctx.skills}
+          commandQuickActions={commandQuickActions ?? []}
+          commandQuickActionStates={commandQuickActionStates}
+          onRunCommandQuickAction={runCommandQuickAction}
+          onCommandQuickActionStatusChange={onCommandQuickActionStatusChange}
+          renderCommandQuickActionOutput={renderCommandQuickActionOutput}
         />
         <AssistantChangedFilesSection
           turnSummary={row.assistantTurnDiffSummary}
@@ -1146,6 +1264,106 @@ function AssistantTimelineRow({ row }: { row: Extract<TimelineRow, { kind: "mess
         ) : null}
       </div>
     </>
+  );
+}
+
+function InlineCommandQuickActionOutput({
+  action,
+  execution,
+  onStatusChange,
+}: CommandQuickActionOutputRenderProps) {
+  const ctx = use(TimelineRowCtx);
+  const outputRef = useRef<HTMLPreElement>(null);
+  const terminal = useAttachedTerminalSession({
+    environmentId: ctx.activeThreadEnvironmentId,
+    terminal:
+      ctx.threadRef === null
+        ? null
+        : {
+            threadId: ctx.threadRef.threadId,
+            terminalId: execution.terminalId,
+          },
+  });
+  const { completion, status } = resolveInlineQuickActionExecution(
+    terminal,
+    execution.historyOffset,
+  );
+  const output =
+    terminal.version === 0
+      ? ""
+      : formatInlineQuickActionOutput(terminal.buffer, execution.historyOffset, {
+          command: action.command,
+          terminalIdle: status !== "running" && status !== "input-required",
+        });
+
+  useEffect(() => {
+    onStatusChange(status satisfies CommandQuickActionExecutionStatus);
+  }, [onStatusChange, status]);
+
+  useEffect(() => {
+    const element = outputRef.current;
+    if (element === null) return;
+    element.scrollTop = element.scrollHeight;
+  }, [output]);
+
+  return (
+    <div
+      className="w-full overflow-hidden border-t border-border/70 bg-muted/20"
+      aria-live="polite"
+    >
+      <div className="flex min-h-9 items-center justify-between gap-3 border-b border-border/60 px-3 py-1.5">
+        <div className="flex min-w-0 items-center gap-2 text-xs">
+          <span
+            className={cn(
+              "size-1.5 shrink-0 rounded-full",
+              status === "error" || status === "failed"
+                ? "bg-destructive"
+                : status === "input-required"
+                  ? "bg-blue-500"
+                  : status === "running"
+                    ? "bg-amber-500"
+                    : "bg-emerald-500",
+            )}
+          />
+          <span className="font-medium text-foreground">
+            {status === "error"
+              ? "Terminal error"
+              : status === "failed"
+                ? `Failed · exit code ${completion?.exitCode ?? "unknown"}`
+                : status === "input-required"
+                  ? "Input required"
+                  : status === "running"
+                    ? "Running"
+                    : "Finished"}
+          </span>
+          <span className="truncate font-mono text-muted-foreground">{action.command}</span>
+        </div>
+        {status === "input-required" ? (
+          <Button
+            type="button"
+            variant="ghost"
+            size="sm"
+            className="h-7 shrink-0 gap-1.5 px-2 text-xs"
+            onClick={() => ctx.onOpenCommandQuickActionTerminal(execution.terminalId)}
+          >
+            <TerminalIcon className="size-3.5" />
+            Open terminal
+          </Button>
+        ) : null}
+      </div>
+      <pre
+        ref={outputRef}
+        className="max-h-44 overflow-auto whitespace-pre-wrap break-words px-3 py-2 font-mono text-[11px] text-foreground/85 leading-relaxed"
+      >
+        {terminal.error ??
+          (output ||
+            (status === "running"
+              ? "Waiting for output…"
+              : status === "input-required"
+                ? "Open the terminal to continue."
+                : "No output."))}
+      </pre>
+    </div>
   );
 }
 

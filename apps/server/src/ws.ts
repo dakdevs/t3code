@@ -15,6 +15,8 @@ import {
   type AuthAccessStreamEvent,
   type AuthEnvironmentScope,
   AuthSessionId,
+  type CommandQuickActionRunInput,
+  type CommandQuickActionRunResult,
   CommandId,
   type DiscoveredLocalServerList,
   EventId,
@@ -85,6 +87,7 @@ import * as ServerLifecycleEvents from "./serverLifecycleEvents.ts";
 import * as ServerRuntimeStartup from "./serverRuntimeStartup.ts";
 import * as ServerSettings from "./serverSettings.ts";
 import * as TerminalManager from "./terminal/Manager.ts";
+import * as CommandQuickActionRunner from "./quick-actions/command-quick-action-runner.ts";
 import * as PreviewAutomationBroker from "./mcp/PreviewAutomationBroker.ts";
 import * as PreviewManager from "./preview/Manager.ts";
 import { issueAssetUrl } from "./assets/AssetAccess.ts";
@@ -107,6 +110,7 @@ import * as ProcessResourceMonitor from "./diagnostics/ProcessResourceMonitor.ts
 import * as ResourceTelemetry from "./resourceTelemetry/ResourceTelemetry.ts";
 import * as UsageService from "./usage/UsageService.ts";
 import * as TraceDiagnostics from "./diagnostics/TraceDiagnostics.ts";
+import * as PullRequestService from "./pullRequest/PullRequestService.ts";
 import * as SourceControlDiscovery from "./sourceControl/SourceControlDiscovery.ts";
 import * as SourceControlRepositoryService from "./sourceControl/SourceControlRepositoryService.ts";
 import * as AzureDevOpsCli from "./sourceControl/AzureDevOpsCli.ts";
@@ -274,6 +278,7 @@ export function isThreadDetailEvent(event: OrchestrationEvent): event is Extract
   {
     type:
       | "thread.message-sent"
+      | "thread.message-quick-actions-set"
       | "thread.proposed-plan-upserted"
       | "thread.activity-appended"
       | "thread.turn-diff-completed"
@@ -283,6 +288,7 @@ export function isThreadDetailEvent(event: OrchestrationEvent): event is Extract
 > {
   return (
     event.type === "thread.message-sent" ||
+    event.type === "thread.message-quick-actions-set" ||
     event.type === "thread.proposed-plan-upserted" ||
     event.type === "thread.activity-appended" ||
     event.type === "thread.turn-diff-completed" ||
@@ -365,6 +371,7 @@ const makeWsRpcLayer = (
       const vcsProvisioning = yield* VcsProvisioningService.VcsProvisioningService;
       const vcsStatusBroadcaster = yield* VcsStatusBroadcaster.VcsStatusBroadcaster;
       const terminalManager = yield* TerminalManager.TerminalManager;
+      const commandQuickActionRunner = yield* CommandQuickActionRunner.CommandQuickActionRunner;
       const previewManager = yield* PreviewManager.PreviewManager;
       const portDiscovery = yield* PortScanner.PortDiscovery;
       const providerRegistry = yield* ProviderRegistry.ProviderRegistry;
@@ -408,6 +415,7 @@ const makeWsRpcLayer = (
       );
       const sourceControlRepositories =
         yield* SourceControlRepositoryService.SourceControlRepositoryService;
+      const pullRequests = yield* PullRequestService.PullRequestService;
       const bootstrapCredentials = yield* PairingGrantStore.PairingGrantStore;
       const sessions = yield* SessionStore.SessionStore;
       const processDiagnostics = yield* ProcessDiagnostics.ProcessDiagnostics;
@@ -483,6 +491,47 @@ const makeWsRpcLayer = (
       const serverEventId = randomUUID.pipe(Effect.map(EventId.make));
       const serverCommandId = (tag: string) =>
         randomUUID.pipe(Effect.map((uuid) => CommandId.make(`server:${tag}:${uuid}`)));
+
+      const persistCommandQuickActionExecution = (
+        input: CommandQuickActionRunInput,
+        execution: CommandQuickActionRunResult,
+      ) =>
+        Effect.gen(function* () {
+          const threadOption = yield* projectionSnapshotQuery.getThreadDetailById(input.threadId);
+          const thread = Option.getOrUndefined(threadOption);
+          const message = thread?.messages.find((entry) => entry.id === input.messageId);
+          if (message?.quickActions === undefined) return;
+          yield* orchestrationEngine.dispatch({
+            type: "thread.message.quick-actions.set",
+            commandId: yield* serverCommandId("quick-action-execution-set"),
+            threadId: input.threadId,
+            messageId: input.messageId,
+            quickActions: CommandQuickActionRunner.withCommandQuickActionExecution(
+              message.quickActions,
+              input.actionId,
+              execution,
+            ),
+            createdAt: yield* nowIso,
+          });
+        }).pipe(
+          Effect.catch((error) =>
+            Effect.logWarning("Failed to persist command quick action execution").pipe(
+              Effect.annotateLogs({
+                threadId: input.threadId,
+                messageId: input.messageId,
+                actionId: input.actionId,
+                error: String(error),
+              }),
+            ),
+          ),
+        );
+
+      const runCommandQuickAction = (input: CommandQuickActionRunInput) =>
+        Effect.gen(function* () {
+          const execution = yield* commandQuickActionRunner.run(input);
+          yield* persistCommandQuickActionExecution(input, execution);
+          return execution;
+        });
 
       const loadAuthAccessSnapshot = () =>
         Effect.all({
@@ -1035,7 +1084,16 @@ const makeWsRpcLayer = (
           observeRpcEffect(
             ORCHESTRATION_WS_METHODS.dispatchCommand,
             Effect.gen(function* () {
-              const normalizedCommand = yield* normalizeDispatchCommand(command);
+              const normalizedBaseCommand = yield* normalizeDispatchCommand(command);
+              const normalizedCommand =
+                normalizedBaseCommand.type === "thread.turn.start"
+                  ? {
+                      ...normalizedBaseCommand,
+                      providerContext: yield* commandQuickActionRunner.takeAvailableOutputContext(
+                        normalizedBaseCommand.threadId,
+                      ),
+                    }
+                  : normalizedBaseCommand;
               // Archive and settle both mean "done with this thread", so a
               // live provider session must not keep running background work
               // (PR monitors, dev servers, subagent fleets) after either
@@ -1634,6 +1692,68 @@ const makeWsRpcLayer = (
             ),
             { "rpc.aggregate": "cloud" },
           ),
+        [WS_METHODS.pullRequestsList]: (input) =>
+          observeRpcEffect(WS_METHODS.pullRequestsList, pullRequests.list(input), {
+            "rpc.aggregate": "pull-requests",
+          }),
+        [WS_METHODS.pullRequestsListStats]: (input) =>
+          observeRpcEffect(WS_METHODS.pullRequestsListStats, pullRequests.listStats(input), {
+            "rpc.aggregate": "pull-requests",
+          }),
+        [WS_METHODS.pullRequestsDetail]: (input) =>
+          observeRpcEffect(WS_METHODS.pullRequestsDetail, pullRequests.detail(input), {
+            "rpc.aggregate": "pull-requests",
+          }),
+        [WS_METHODS.pullRequestsActivity]: (input) =>
+          observeRpcEffect(WS_METHODS.pullRequestsActivity, pullRequests.activity(input), {
+            "rpc.aggregate": "pull-requests",
+          }),
+        [WS_METHODS.pullRequestsDiffFileContents]: (input) =>
+          observeRpcEffect(
+            WS_METHODS.pullRequestsDiffFileContents,
+            pullRequests.diffFileContents(input),
+            { "rpc.aggregate": "pull-requests" },
+          ),
+        [WS_METHODS.pullRequestsRunAction]: (input) =>
+          observeRpcEffect(WS_METHODS.pullRequestsRunAction, pullRequests.runAction(input), {
+            "rpc.aggregate": "pull-requests",
+          }),
+        [WS_METHODS.pullRequestsComment]: (input) =>
+          observeRpcEffect(WS_METHODS.pullRequestsComment, pullRequests.comment(input), {
+            "rpc.aggregate": "pull-requests",
+          }),
+        [WS_METHODS.pullRequestsSubmitReview]: (input) =>
+          observeRpcEffect(WS_METHODS.pullRequestsSubmitReview, pullRequests.submitReview(input), {
+            "rpc.aggregate": "pull-requests",
+          }),
+        [WS_METHODS.pullRequestsReplyToThread]: (input) =>
+          observeRpcEffect(
+            WS_METHODS.pullRequestsReplyToThread,
+            pullRequests.replyToThread(input),
+            { "rpc.aggregate": "pull-requests" },
+          ),
+        [WS_METHODS.pullRequestsSetThreadResolution]: (input) =>
+          observeRpcEffect(
+            WS_METHODS.pullRequestsSetThreadResolution,
+            pullRequests.setThreadResolution(input),
+            { "rpc.aggregate": "pull-requests" },
+          ),
+        [WS_METHODS.pullRequestsInvalidate]: (input) =>
+          observeRpcEffect(WS_METHODS.pullRequestsInvalidate, pullRequests.invalidate(input), {
+            "rpc.aggregate": "pull-requests",
+          }),
+        [WS_METHODS.pullRequestsReviewerCandidates]: (input) =>
+          observeRpcEffect(
+            WS_METHODS.pullRequestsReviewerCandidates,
+            pullRequests.reviewerCandidates(input),
+            { "rpc.aggregate": "pull-requests" },
+          ),
+        [WS_METHODS.pullRequestsRequestReviewers]: (input) =>
+          observeRpcEffect(
+            WS_METHODS.pullRequestsRequestReviewers,
+            pullRequests.requestReviewers(input),
+            { "rpc.aggregate": "pull-requests" },
+          ),
         [WS_METHODS.sourceControlLookupRepository]: (input) =>
           observeRpcEffect(
             WS_METHODS.sourceControlLookupRepository,
@@ -1979,6 +2099,10 @@ const makeWsRpcLayer = (
           observeRpcEffect(WS_METHODS.terminalClose, terminalManager.close(input), {
             "rpc.aggregate": "terminal",
           }),
+        [WS_METHODS.commandQuickActionRun]: (input) =>
+          observeRpcEffect(WS_METHODS.commandQuickActionRun, runCommandQuickAction(input), {
+            "rpc.aggregate": "terminal",
+          }),
         [WS_METHODS.subscribeTerminalEvents]: (_input) =>
           observeRpcStream(
             WS_METHODS.subscribeTerminalEvents,
@@ -2199,6 +2323,7 @@ export const websocketRpcRouteLayer = Layer.unwrap(
   Effect.gen(function* () {
     const previewAutomationBroker = yield* PreviewAutomationBroker.PreviewAutomationBroker;
     const serverSelfUpdate = yield* ServerSelfUpdate.ServerSelfUpdate;
+    const pullRequests = yield* PullRequestService.PullRequestService;
     return HttpRouter.add(
       "GET",
       "/ws",
@@ -2222,6 +2347,9 @@ export const websocketRpcRouteLayer = Layer.unwrap(
               Layer.provideMerge(RpcSerialization.layerJson),
               Layer.provide(ProviderMaintenanceRunner.layer),
               Layer.provide(Layer.succeed(ServerSelfUpdate.ServerSelfUpdate, serverSelfUpdate)),
+              // One server-lifetime service means clients share the same PR caches, and a WS
+              // mutation invalidates the HTTP diff cache that every client reads from.
+              Layer.provide(Layer.succeed(PullRequestService.PullRequestService, pullRequests)),
               Layer.provide(
                 SourceControlDiscovery.layer.pipe(
                   Layer.provide(

@@ -307,7 +307,7 @@ describe("applyThreadDetailEvent", () => {
     });
   });
 
-  describe("thread.message-sent", () => {
+  describe("message events", () => {
     it("appends a new message", () => {
       const result = applyThreadDetailEvent(baseThread, {
         ...baseEventFields,
@@ -374,6 +374,58 @@ describe("applyThreadDetailEvent", () => {
       if (result.kind === "updated") {
         expect(result.thread.messages).toHaveLength(1);
         expect(result.thread.messages[0]?.text).toBe("Hello, world!");
+      }
+    });
+
+    it("applies a targeted quick-action update without replacing message content", () => {
+      const threadWithMessage: OrchestrationThread = {
+        ...baseThread,
+        messages: [
+          {
+            id: MessageId.make("msg-quick-action"),
+            role: "assistant",
+            text: "Run this command.",
+            turnId: TurnId.make("turn-quick-action"),
+            streaming: false,
+            createdAt: "2026-04-01T06:00:00.000Z",
+            updatedAt: "2026-04-01T06:00:00.000Z",
+          },
+        ],
+      };
+
+      const result = applyThreadDetailEvent(threadWithMessage, {
+        ...baseEventFields,
+        sequence: 8,
+        occurredAt: "2026-04-01T06:01:00.000Z",
+        aggregateKind: "thread",
+        aggregateId: ThreadId.make("thread-1"),
+        type: "thread.message-quick-actions-set",
+        payload: {
+          threadId: ThreadId.make("thread-1"),
+          messageId: MessageId.make("msg-quick-action"),
+          quickActions: [
+            {
+              id: "code-block-1",
+              label: "Run git pull",
+              command: "git pull --ff-only",
+              execution: { terminalId: "term-2", historyOffset: 42 },
+            },
+          ],
+          updatedAt: "2026-04-01T06:01:00.000Z",
+        },
+      });
+
+      expect(result.kind).toBe("updated");
+      if (result.kind === "updated") {
+        expect(result.thread.messages[0]?.text).toBe("Run this command.");
+        expect(result.thread.messages[0]?.quickActions).toEqual([
+          {
+            id: "code-block-1",
+            label: "Run git pull",
+            command: "git pull --ff-only",
+            execution: { terminalId: "term-2", historyOffset: 42 },
+          },
+        ]);
       }
     });
 

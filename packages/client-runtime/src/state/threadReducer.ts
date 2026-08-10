@@ -281,6 +281,29 @@ export function applyThreadDetailEvent(
     }
 
     // ── Messages ────────────────────────────────────────────────────
+    case "thread.message-quick-actions-set": {
+      const message = thread.messages.find((entry) => entry.id === event.payload.messageId);
+      if (message === undefined) {
+        return { kind: "unchanged" };
+      }
+      return {
+        kind: "updated",
+        thread: {
+          ...thread,
+          messages: thread.messages.map((entry) =>
+            entry.id === event.payload.messageId
+              ? {
+                  ...entry,
+                  quickActions: event.payload.quickActions,
+                  updatedAt: event.payload.updatedAt,
+                }
+              : entry,
+          ),
+          updatedAt: event.occurredAt,
+        },
+      };
+    }
+
     case "thread.message-sent": {
       const message: OrchestrationMessage = {
         id: event.payload.messageId,
@@ -288,6 +311,9 @@ export function applyThreadDetailEvent(
         text: event.payload.text,
         ...(event.payload.attachments !== undefined
           ? { attachments: event.payload.attachments }
+          : {}),
+        ...(event.payload.quickActions !== undefined
+          ? { quickActions: event.payload.quickActions }
           : {}),
         turnId: event.payload.turnId,
         streaming: event.payload.streaming,
@@ -312,6 +338,9 @@ export function applyThreadDetailEvent(
                   ...(message.streaming ? {} : { updatedAt: message.updatedAt }),
                   ...(message.attachments !== undefined
                     ? { attachments: message.attachments }
+                    : {}),
+                  ...(message.quickActions !== undefined
+                    ? { quickActions: message.quickActions }
                     : {}),
                 },
           )

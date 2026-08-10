@@ -2,18 +2,33 @@ import { useAtomValue } from "@effect/atom-react";
 import {
   CheckIcon,
   ChevronRightIcon,
+  CircleAlertIcon,
   CopyIcon,
   GlobeIcon,
+  InfoIcon,
+  LightbulbIcon,
+  LoaderCircleIcon,
   Maximize2Icon,
+  MessageSquareWarningIcon,
   Minimize2Icon,
+  OctagonAlertIcon,
+  PlayIcon,
+  TerminalIcon,
+  TriangleAlertIcon,
   WrapTextIcon,
 } from "lucide-react";
-import type { ScopedThreadRef, ServerProviderSkill } from "@t3tools/contracts";
+import type {
+  CommandQuickActionRunResult,
+  OrchestrationQuickAction,
+  ScopedThreadRef,
+  ServerProviderSkill,
+} from "@t3tools/contracts";
 import {
   isAtomCommandInterrupted,
   squashAtomCommandFailure,
   type AtomCommandResult,
 } from "@t3tools/client-runtime/state/runtime";
+import type { InlineQuickActionExecutionStatus } from "@t3tools/client-runtime/state/terminal";
 import * as Cause from "effect/Cause";
 import { AsyncResult } from "effect/unstable/reactivity";
 import React, {
@@ -38,6 +53,7 @@ import rehypeRaw from "rehype-raw";
 import rehypeSanitize, { defaultSchema } from "rehype-sanitize";
 import remarkBreaks from "remark-breaks";
 import remarkGfm from "remark-gfm";
+import { remarkGithubAlerts } from "../markdown-github-alerts";
 import { renderSkillInlineMarkdownChildren } from "./chat/SkillInlineText";
 import { CHAT_FILE_TAG_CHIP_CLASS_NAME, FileTagChipContent } from "./chat/FileTagChip";
 import { PierreEntryIcon } from "./chat/PierreEntryIcon";
@@ -84,6 +100,7 @@ import { usePreparedConnection } from "../state/session";
 import { previewEnvironment } from "../state/preview";
 import { useAtomCommand } from "../state/use-atom-command";
 import { useAtomQueryRunner } from "../state/use-atom-query-runner";
+import { useOpenChangeRequestLink } from "~/lib/openPullRequestLink";
 import { writeTextToClipboard } from "../hooks/useCopyToClipboard";
 import { isPreviewSupportedInRuntime } from "../previewStateStore";
 import {
@@ -92,6 +109,20 @@ import {
   openUrlInPreview,
   BrowserPreviewUnavailableError,
 } from "../browser/openFileInPreview";
+
+export type CommandQuickActionExecutionStatus = InlineQuickActionExecutionStatus;
+export type CommandQuickActionStatus = "idle" | "starting" | CommandQuickActionExecutionStatus;
+
+export interface CommandQuickActionRenderState {
+  readonly status: CommandQuickActionStatus;
+  readonly execution: CommandQuickActionRunResult | null;
+}
+
+export interface CommandQuickActionOutputRenderProps {
+  readonly action: OrchestrationQuickAction;
+  readonly execution: CommandQuickActionRunResult;
+  readonly onStatusChange: (status: CommandQuickActionExecutionStatus) => void;
+}
 
 interface ChatMarkdownProps {
   text: string;
@@ -103,6 +134,14 @@ interface ChatMarkdownProps {
   className?: string;
   /** Treat single newlines as hard breaks — chat-style user input. */
   lineBreaks?: boolean;
+  commandQuickActions?: ReadonlyArray<OrchestrationQuickAction>;
+  commandQuickActionStates?: Readonly<Record<string, CommandQuickActionRenderState>>;
+  onRunCommandQuickAction?: (action: OrchestrationQuickAction) => void;
+  onCommandQuickActionStatusChange?: (
+    actionId: string,
+    status: CommandQuickActionExecutionStatus,
+  ) => void;
+  renderCommandQuickActionOutput?: (props: CommandQuickActionOutputRenderProps) => ReactNode;
 }
 
 const EMPTY_MARKDOWN_SKILLS: ReadonlyArray<Pick<ServerProviderSkill, "name" | "displayName">> = [];
@@ -145,6 +184,7 @@ const CHAT_MARKDOWN_SANITIZE_SCHEMA = {
     ...defaultSchema.attributes,
     "*": (defaultSchema.attributes?.["*"] ?? []).filter((attribute) => attribute !== "title"),
     code: [...(defaultSchema.attributes?.code ?? []), "dataCodeMeta", "dataInlineCode"],
+    blockquote: [...(defaultSchema.attributes?.blockquote ?? []), "dataAlert"],
   },
   protocols: {
     ...defaultSchema.protocols,
@@ -154,6 +194,7 @@ const CHAT_MARKDOWN_SANITIZE_SCHEMA = {
 
 const CHAT_MARKDOWN_REMARK_PLUGINS = [
   remarkGfm,
+  remarkGithubAlerts,
   remarkNormalizeListItemIndentation,
   remarkPreserveCodeMeta,
   remarkTagInlineCode,
@@ -161,6 +202,7 @@ const CHAT_MARKDOWN_REMARK_PLUGINS = [
 
 const CHAT_MARKDOWN_REMARK_PLUGINS_WITH_BREAKS = [
   remarkGfm,
+  remarkGithubAlerts,
   remarkNormalizeListItemIndentation,
   remarkBreaks,
   remarkPreserveCodeMeta,
@@ -171,6 +213,43 @@ const CHAT_MARKDOWN_REHYPE_PLUGINS = [
   rehypeRaw,
   [rehypeSanitize, CHAT_MARKDOWN_SANITIZE_SCHEMA],
 ] satisfies NonNullable<ReactMarkdownOptions["rehypePlugins"]>;
+
+/** GitHub's own five alert kinds, in its colors: the glyph names the urgency, the title says it. */
+const GITHUB_ALERT_PRESENTATIONS: Record<
+  string,
+  { label: string; Icon: typeof InfoIcon; borderClassName: string; titleClassName: string }
+> = {
+  note: {
+    label: "Note",
+    Icon: InfoIcon,
+    borderClassName: "border-blue-500/70",
+    titleClassName: "text-blue-600 dark:text-blue-400",
+  },
+  tip: {
+    label: "Tip",
+    Icon: LightbulbIcon,
+    borderClassName: "border-emerald-500/70",
+    titleClassName: "text-emerald-600 dark:text-emerald-400",
+  },
+  important: {
+    label: "Important",
+    Icon: MessageSquareWarningIcon,
+    borderClassName: "border-purple-500/70",
+    titleClassName: "text-purple-600 dark:text-purple-400",
+  },
+  warning: {
+    label: "Warning",
+    Icon: TriangleAlertIcon,
+    borderClassName: "border-amber-500/70",
+    titleClassName: "text-amber-600 dark:text-amber-500",
+  },
+  caution: {
+    label: "Caution",
+    Icon: OctagonAlertIcon,
+    borderClassName: "border-red-500/70",
+    titleClassName: "text-red-600 dark:text-red-400",
+  },
+};
 
 function extractFenceLanguage(className: string | undefined): string {
   const match = className?.match(CODE_FENCE_LANGUAGE_REGEX);
@@ -541,19 +620,35 @@ function MarkdownCodeBlock({
   language,
   fenceTitle,
   theme,
+  commandQuickAction,
+  commandQuickActionState,
+  onRunCommandQuickAction,
+  onCommandQuickActionStatusChange,
+  renderCommandQuickActionOutput,
   children,
 }: {
   code: string;
   language: string;
   fenceTitle: string | null;
   theme: "light" | "dark";
+  commandQuickAction?: OrchestrationQuickAction;
+  commandQuickActionState?: CommandQuickActionRenderState;
+  onRunCommandQuickAction?: (action: OrchestrationQuickAction) => void;
+  onCommandQuickActionStatusChange?: (
+    actionId: string,
+    status: CommandQuickActionExecutionStatus,
+  ) => void;
+  renderCommandQuickActionOutput?: (props: CommandQuickActionOutputRenderProps) => ReactNode;
   children: ReactNode;
 }) {
   const [copied, setCopied] = useState(false);
   const [wrapped, setWrapped] = useState(readInitialWordWrapSetting);
   const copiedTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const quickActionStatus = commandQuickActionState?.status ?? "idle";
+  const quickActionExecution = commandQuickActionState?.execution ?? null;
   const wrapLabel = wrapped ? "Disable line wrap" : "Wrap lines";
   const copyLabel = copied ? "Copied" : "Copy code";
+  const quickActionLoading = quickActionStatus === "starting" || quickActionStatus === "running";
 
   const handleCopy = useCallback(() => {
     if (typeof navigator === "undefined" || navigator.clipboard == null) {
@@ -608,6 +703,52 @@ function MarkdownCodeBlock({
           />
         </span>
         <span className="flex items-center gap-0.5" role="toolbar" aria-label="Code block actions">
+          {commandQuickAction !== undefined && onRunCommandQuickAction !== undefined ? (
+            <Tooltip>
+              <TooltipTrigger
+                render={
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="icon-xs"
+                    className="chat-markdown-chrome-action"
+                    disabled={quickActionStatus !== "idle"}
+                    onClick={() => onRunCommandQuickAction(commandQuickAction)}
+                    aria-label={
+                      quickActionLoading
+                        ? `Running ${commandQuickAction.command}`
+                        : quickActionStatus === "finished"
+                          ? `Finished ${commandQuickAction.command}`
+                          : quickActionStatus === "input-required"
+                            ? `Input required for ${commandQuickAction.command}`
+                            : quickActionStatus === "failed" || quickActionStatus === "error"
+                              ? `Failed ${commandQuickAction.command}`
+                              : `Run ${commandQuickAction.command}`
+                    }
+                  />
+                }
+              >
+                {quickActionLoading ? (
+                  <LoaderCircleIcon className="size-3 animate-spin" />
+                ) : quickActionStatus === "finished" ? (
+                  <CheckIcon className="size-3" />
+                ) : quickActionStatus === "input-required" ? (
+                  <TerminalIcon className="size-3" />
+                ) : quickActionStatus === "failed" || quickActionStatus === "error" ? (
+                  <CircleAlertIcon className="size-3" />
+                ) : (
+                  <PlayIcon className="size-3 fill-current" />
+                )}
+              </TooltipTrigger>
+              <TooltipPopup side="top">
+                {quickActionLoading
+                  ? "Running command"
+                  : quickActionStatus === "input-required"
+                    ? "Input required"
+                    : commandQuickAction.label}
+              </TooltipPopup>
+            </Tooltip>
+          ) : null}
           <Tooltip>
             <TooltipTrigger
               render={
@@ -646,6 +787,16 @@ function MarkdownCodeBlock({
         </span>
       </div>
       {children}
+      {commandQuickAction !== undefined &&
+      quickActionExecution !== null &&
+      renderCommandQuickActionOutput !== undefined
+        ? renderCommandQuickActionOutput({
+            action: commandQuickAction,
+            execution: quickActionExecution,
+            onStatusChange: (status) =>
+              onCommandQuickActionStatusChange?.(commandQuickAction.id, status),
+          })
+        : null}
     </div>
   );
 }
@@ -903,6 +1054,25 @@ function plainHastText(node: unknown): string | null {
     return null;
   });
   return parts.every((part) => part !== null) ? parts.join("") : null;
+}
+
+/**
+ * Whether the link carries any words of its own. An anchor that is only an image — a badge, a
+ * "Fix in Cursor" button — already shows its identity, and a favicon bolted on in front of it
+ * is a stray logo rather than a hint.
+ */
+function hastHasText(node: unknown): boolean {
+  if (!node || typeof node !== "object") return false;
+  if (
+    "type" in node &&
+    node.type === "text" &&
+    "value" in node &&
+    typeof node.value === "string" &&
+    node.value.trim().length > 0
+  ) {
+    return true;
+  }
+  return "children" in node && Array.isArray(node.children) && node.children.some(hastHasText);
 }
 
 const SANITIZED_FRAGMENT_PREFIX = "user-content-";
@@ -1261,6 +1431,11 @@ function ChatMarkdown({
   skills = EMPTY_MARKDOWN_SKILLS,
   className,
   lineBreaks = false,
+  commandQuickActions,
+  commandQuickActionStates,
+  onRunCommandQuickAction,
+  onCommandQuickActionStatusChange,
+  renderCommandQuickActionOutput,
 }: ChatMarkdownProps) {
   const { resolvedTheme } = useTheme();
   const createAssetUrl = useAtomQueryRunner(assetEnvironment.createUrl, {
@@ -1324,6 +1499,7 @@ function ChatMarkdown({
     event.clipboardData.setData("text/plain", payload.text);
     event.clipboardData.setData("text/html", payload.html);
   }, []);
+  const openChangeRequestLink = useOpenChangeRequestLink(threadRef);
   const openExternalLinkInPreview = useCallback(
     (url: string) => {
       if (!threadRef) {
@@ -1416,6 +1592,26 @@ function ChatMarkdown({
       p({ node: _node, children, ...props }) {
         return <p {...props}>{renderSkillInlineMarkdownChildren(children, skills)}</p>;
       },
+      blockquote({ node: _node, children, ...props }) {
+        const alert =
+          GITHUB_ALERT_PRESENTATIONS[
+            String((props as Record<string, unknown>)["data-alert"] ?? "")
+          ];
+        if (!alert) {
+          return <blockquote {...props}>{children}</blockquote>;
+        }
+        // Not a <blockquote>: the stylesheet mutes those, and an alert's body is ordinary
+        // text under a colored title — which is how the host renders it.
+        return (
+          <div role="note" className={cn("my-1 border-l-2 pl-3", alert.borderClassName)}>
+            <p className={cn("flex items-center gap-1.5 font-medium", alert.titleClassName)}>
+              <alert.Icon aria-hidden className="size-3.5 shrink-0" />
+              {alert.label}
+            </p>
+            {children}
+          </div>
+        );
+      },
       li({ node, children, ...props }) {
         const listItemStart = node?.position?.start.offset;
         const markerOffset =
@@ -1473,7 +1669,13 @@ function ChatMarkdown({
                 onClick?.(event);
                 if (isSameDocumentLink && href) {
                   handleMarkdownFragmentClick(event, href);
+                  return;
                 }
+                // A link to a change request in a workspace project opens beside the
+                // conversation instead of in a browser: it is the thing being talked about, and
+                // the panel it opens offers the browser as one of its actions. Anything else is
+                // an ordinary link and keeps the `_blank` the shell already handles.
+                if (href) openChangeRequestLink(event, href);
               }}
               onContextMenu={(event) => {
                 if (!canOpenInPreview || !href || !faviconHost) return;
@@ -1502,7 +1704,7 @@ function ChatMarkdown({
                 });
               }}
             >
-              {faviconHost ? (
+              {faviconHost && hastHasText(node) ? (
                 <MarkdownExternalLinkContent host={faviconHost} plainText={plainHastText(node)}>
                   {children}
                 </MarkdownExternalLinkContent>
@@ -1563,12 +1765,28 @@ function ChatMarkdown({
 
         const language = extractFenceLanguage(codeBlock.className);
         const fenceTitle = extractFenceTitle(extractPreCodeMeta(node));
+        const commandQuickAction = commandQuickActions?.find(
+          (action) => action.command.trim() === codeBlock.code.trim(),
+        );
+        const commandQuickActionState =
+          commandQuickAction === undefined
+            ? undefined
+            : commandQuickActionStates?.[commandQuickAction.id];
         return (
           <MarkdownCodeBlock
             code={codeBlock.code}
             language={language}
             fenceTitle={fenceTitle}
             theme={resolvedTheme}
+            {...(commandQuickAction === undefined ? {} : { commandQuickAction })}
+            {...(commandQuickActionState === undefined ? {} : { commandQuickActionState })}
+            {...(onRunCommandQuickAction === undefined ? {} : { onRunCommandQuickAction })}
+            {...(onCommandQuickActionStatusChange === undefined
+              ? {}
+              : { onCommandQuickActionStatusChange })}
+            {...(renderCommandQuickActionOutput === undefined
+              ? {}
+              : { renderCommandQuickActionOutput })}
           >
             <RenderErrorBoundary fallback={<pre {...props}>{children}</pre>}>
               <Suspense fallback={<pre {...props}>{children}</pre>}>
@@ -1585,6 +1803,8 @@ function ChatMarkdown({
       },
     };
   }, [
+    commandQuickActions,
+    commandQuickActionStates,
     cwd,
     diffThemeName,
     fileLinkParentSuffixByPath,
@@ -1592,10 +1812,13 @@ function ChatMarkdown({
     isStreaming,
     markdownFileLinkMetaByHref,
     onTaskListChange,
+    onRunCommandQuickAction,
+    onCommandQuickActionStatusChange,
     openInPreferredEditor,
     openExternalLinkInPreview,
     openMarkdownFileInPreview,
     resolvedTheme,
+    renderCommandQuickActionOutput,
     skills,
     text,
     threadRef,

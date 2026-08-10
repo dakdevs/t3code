@@ -1,7 +1,19 @@
 import * as Haptics from "expo-haptics";
 import { KeyboardAwareLegendList } from "@legendapp/list/keyboard";
 import { type LegendListRef } from "@legendapp/list/react-native";
-import type { EnvironmentId, MessageId, ThreadId, TurnId } from "@t3tools/contracts";
+import type {
+  CommandQuickActionRunResult,
+  EnvironmentId,
+  MessageId,
+  OrchestrationQuickAction,
+  ThreadId,
+  TurnId,
+} from "@t3tools/contracts";
+import {
+  formatInlineQuickActionOutput,
+  type InlineQuickActionExecutionStatus,
+  resolveInlineQuickActionExecution,
+} from "@t3tools/client-runtime/state/terminal";
 import { CHAT_LIST_ANCHOR_OFFSET, resolveChatListAnchoredEndSpace } from "@t3tools/shared/chatList";
 import { formatElapsed } from "@t3tools/shared/orchestrationTiming";
 import { SymbolView } from "../../components/AppSymbol";
@@ -16,6 +28,7 @@ import {
   useMemo,
   useRef,
   useState,
+  type ComponentProps,
   type ReactNode,
   type RefObject,
 } from "react";
@@ -49,6 +62,7 @@ import Animated, { FadeIn, FadeInUp, type SharedValue } from "react-native-reani
 import { useThemeColor } from "../../lib/useThemeColor";
 import { useFontFamily } from "../../lib/useFontFamily";
 import { copyTextWithHaptic } from "../../lib/copyTextWithHaptic";
+import { hasWideMarkdownBlock } from "../../lib/wideMarkdownBlocks";
 import {
   hasNativeSelectableMarkdownText,
   SelectableMarkdownText,
@@ -80,6 +94,7 @@ import {
 import { MOBILE_TYPOGRAPHY } from "../../lib/typography";
 import { useAppearancePreferences } from "../settings/appearance/AppearancePreferencesProvider";
 import { useAppearanceCodeSurface } from "../settings/appearance/useAppearanceCodeSurface";
+import { useAttachedTerminalSession } from "../../state/use-terminal-session";
 import { markdownFileIconSource } from "@t3tools/mobile-markdown-text/file-icons";
 import { resolveMarkdownLinkPresentation } from "@t3tools/mobile-markdown-text/links";
 import {
@@ -130,6 +145,7 @@ function isFreshTimestamp(input: string): boolean {
 }
 
 export interface ThreadFeedProps {
+  readonly commandQuickActionsEnabled: boolean;
   readonly environmentId: EnvironmentId;
   readonly threadId: ThreadId;
   readonly workspaceRoot?: string | null;
@@ -148,6 +164,11 @@ export interface ThreadFeedProps {
   readonly layoutVariant?: LayoutVariant;
   readonly usesAutomaticContentInsets?: boolean;
   readonly onHeaderMaterialVisibilityChange?: (visible: boolean) => void;
+  readonly onRunCommandQuickAction: (
+    messageId: MessageId,
+    actionId: string,
+  ) => Promise<CommandQuickActionRunResult | null>;
+  readonly onOpenCommandQuickActionTerminal: (terminalId: string) => void;
   readonly skills?: ReadonlyArray<SelectableMarkdownSkill>;
   /** Non-null when older turns exist beyond the loaded window. */
   readonly loadEarlier?: {
@@ -235,7 +256,29 @@ interface MarkdownStyleSet {
   readonly styles: NodeStyleOverrides;
   readonly renderers: CustomRenderers;
   readonly nativeTextStyle: NativeMarkdownTextStyle;
+  readonly codeBlockAppearance: MarkdownCodeBlockAppearance;
 }
+
+type MarkdownCodeBlockAppearance = Pick<
+  ComponentProps<typeof MarkdownCodeBlock>,
+  | "backgroundColor"
+  | "borderColor"
+  | "copyTintColor"
+  | "fontSize"
+  | "headerTextColor"
+  | "highlightCode"
+  | "lineHeight"
+  | "textColor"
+  | "theme"
+>;
+
+type MobileCommandQuickActionExecutionStatus = InlineQuickActionExecutionStatus;
+type MobileCommandQuickActionStatus = "idle" | "starting" | MobileCommandQuickActionExecutionStatus;
+
+type MobileCommandQuickActionState = {
+  readonly status: MobileCommandQuickActionStatus;
+  readonly execution: CommandQuickActionRunResult | null;
+};
 
 interface ReviewCommentColors {
   readonly background: ColorValue;
@@ -309,16 +352,57 @@ function MarkdownCodeBlock(props: {
   readonly lineHeight: number;
   readonly textColor: string;
   readonly theme: ReviewDiffTheme;
+  readonly quickAction?: OrchestrationQuickAction;
+  readonly quickActionState?: MobileCommandQuickActionState;
+  readonly environmentId?: EnvironmentId;
+  readonly onRunQuickAction?: (action: OrchestrationQuickAction) => void;
+  readonly onOpenQuickActionTerminal?: (terminalId: string) => void;
+  readonly onQuickActionStatusChange?: (
+    actionId: string,
+    status: MobileCommandQuickActionExecutionStatus,
+  ) => void;
+  readonly threadId?: ThreadId;
 }) {
   const content = props.content.replace(/\n$/, "");
   const languageLabel = props.language?.trim() || "text";
+  const quickActionStatus = props.quickActionState?.status ?? "idle";
+  const execution = props.quickActionState?.execution ?? null;
+  const outputScrollRef = useRef<ScrollView>(null);
   const highlighted = useMarkdownCodeHighlight({
     code: content,
     enabled: props.highlightCode && Boolean(props.language?.trim()),
     language: props.language,
     theme: props.theme,
   });
+  const terminal = useAttachedTerminalSession({
+    environmentId: execution === null ? null : (props.environmentId ?? null),
+    terminal:
+      execution === null || props.threadId === undefined
+        ? null
+        : { threadId: props.threadId, terminalId: execution.terminalId },
+  });
+  const { completion, status } = resolveInlineQuickActionExecution(
+    terminal,
+    execution?.historyOffset ?? 0,
+  );
+  const output =
+    execution === null || props.quickAction === undefined || terminal.version === 0
+      ? ""
+      : formatInlineQuickActionOutput(terminal.buffer, execution.historyOffset, {
+          command: props.quickAction.command,
+          terminalIdle: status !== "running" && status !== "input-required",
+        });
+  const loading = quickActionStatus === "starting" || quickActionStatus === "running";
   let tokenOffset = 0;
+
+  useEffect(() => {
+    outputScrollRef.current?.scrollToEnd({ animated: false });
+  }, [output]);
+
+  useEffect(() => {
+    if (execution === null || props.quickAction === undefined) return;
+    props.onQuickActionStatusChange?.(props.quickAction.id, status);
+  }, [execution, props.onQuickActionStatusChange, props.quickAction, status]);
 
   return (
     <View
@@ -340,13 +424,57 @@ function MarkdownCodeBlock(props: {
         >
           {languageLabel}
         </NativeText>
-        <CopyTextButton
-          accessibilityLabel="Copy code"
-          text={content}
-          tintColor={props.copyTintColor}
-          buttonSize={32}
-          iconSize={16}
-        />
+        <View className="flex-row items-center">
+          {props.quickAction !== undefined ? (
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel={
+                loading
+                  ? `Running ${props.quickAction.command}`
+                  : quickActionStatus === "idle"
+                    ? `Run ${props.quickAction.command}`
+                    : status === "input-required"
+                      ? `Input required for ${props.quickAction.command}`
+                      : status === "error" || status === "failed"
+                        ? `Failed ${props.quickAction.command}`
+                        : `Finished ${props.quickAction.command}`
+              }
+              accessibilityState={{ disabled: quickActionStatus !== "idle" }}
+              disabled={quickActionStatus !== "idle"}
+              onPress={() => {
+                if (props.quickAction !== undefined) props.onRunQuickAction?.(props.quickAction);
+              }}
+              className="size-8 items-center justify-center rounded-lg disabled:opacity-60"
+              hitSlop={4}
+            >
+              {loading ? (
+                <ActivityIndicator size="small" color={props.copyTintColor} />
+              ) : (
+                <SymbolView
+                  name={
+                    quickActionStatus === "idle"
+                      ? "play.fill"
+                      : status === "input-required"
+                        ? "terminal"
+                        : status === "error" || status === "failed"
+                          ? "xmark"
+                          : "checkmark"
+                  }
+                  size={15}
+                  tintColor={props.copyTintColor}
+                  type="monochrome"
+                />
+              )}
+            </Pressable>
+          ) : null}
+          <CopyTextButton
+            accessibilityLabel="Copy code"
+            text={content}
+            tintColor={props.copyTintColor}
+            buttonSize={32}
+            iconSize={16}
+          />
+        </View>
       </View>
       <ScrollView
         horizontal
@@ -409,6 +537,71 @@ function MarkdownCodeBlock(props: {
             : content}
         </NativeText>
       </ScrollView>
+      {execution !== null && props.quickAction !== undefined ? (
+        <View className="border-t border-border bg-card/20" accessibilityLiveRegion="polite">
+          <View className="min-h-10 flex-row items-center gap-2 border-b border-border px-3 py-2">
+            <View
+              className={cn(
+                "h-1.5 w-1.5 shrink-0 rounded-full",
+                status === "error" || status === "failed"
+                  ? "bg-red-500"
+                  : status === "input-required"
+                    ? "bg-blue-500"
+                    : status === "running"
+                      ? "bg-amber-500"
+                      : "bg-emerald-500",
+              )}
+            />
+            <Text className="font-t3-medium text-xs text-foreground">
+              {status === "error"
+                ? "Terminal error"
+                : status === "failed"
+                  ? `Failed · exit code ${completion?.exitCode ?? "unknown"}`
+                  : status === "input-required"
+                    ? "Input required"
+                    : status === "running"
+                      ? "Running"
+                      : "Finished"}
+            </Text>
+            <Text
+              numberOfLines={1}
+              className="min-w-0 flex-1 font-mono text-xs text-foreground-secondary"
+            >
+              {props.quickAction.command}
+            </Text>
+            {status === "input-required" ? (
+              <Pressable
+                accessibilityRole="button"
+                accessibilityLabel="Open terminal"
+                className="min-h-8 flex-row items-center gap-1.5 rounded-lg px-2 active:opacity-60"
+                onPress={() => props.onOpenQuickActionTerminal?.(execution.terminalId)}
+              >
+                <SymbolView
+                  name="terminal"
+                  size={13}
+                  tintColor={props.copyTintColor}
+                  type="monochrome"
+                />
+                <Text className="font-t3-bold text-xs text-foreground">Open terminal</Text>
+              </Pressable>
+            ) : null}
+          </View>
+          <ScrollView ref={outputScrollRef} className="max-h-44" nestedScrollEnabled>
+            <NativeText
+              selectable
+              className="px-3 py-2 font-mono text-[11px] leading-relaxed text-foreground"
+            >
+              {terminal.error ??
+                (output ||
+                  (status === "running"
+                    ? "Waiting for output…"
+                    : status === "input-required"
+                      ? "Open the terminal to continue."
+                      : "No output."))}
+            </NativeText>
+          </ScrollView>
+        </View>
+      ) : null}
     </View>
   );
 }
@@ -725,6 +918,29 @@ function useMarkdownStyles(onLinkPress: (href: string) => void): MarkdownStyleSe
       ...baseStyles,
     };
 
+    const userCodeBlockAppearance: MarkdownCodeBlockAppearance = {
+      backgroundColor: markdownUserFenceBg,
+      borderColor: markdownHrColor,
+      copyTintColor: userBubbleForegroundMuted,
+      fontSize: markdownFontSizes.codeBlockFontSize,
+      headerTextColor: markdownUserFenceText,
+      highlightCode: false,
+      lineHeight: markdownFontSizes.codeBlockLineHeight,
+      textColor: markdownUserFenceText,
+      theme: themeMode,
+    };
+    const assistantCodeBlockAppearance: MarkdownCodeBlockAppearance = {
+      backgroundColor: markdownCodeBg,
+      borderColor: markdownHrColor,
+      copyTintColor: iconSubtleColor,
+      fontSize: markdownFontSizes.codeBlockFontSize,
+      headerTextColor: markdownCodeText,
+      highlightCode: true,
+      lineHeight: markdownFontSizes.codeBlockLineHeight,
+      textColor: markdownCodeText,
+      theme: themeMode,
+    };
+
     return {
       user: {
         theme: userTheme,
@@ -738,6 +954,7 @@ function useMarkdownStyles(onLinkPress: (href: string) => void): MarkdownStyleSe
           true,
           false,
         ),
+        codeBlockAppearance: userCodeBlockAppearance,
         nativeTextStyle: {
           color: markdownUserBodyColor,
           strongColor: markdownUserBodyColor,
@@ -771,6 +988,7 @@ function useMarkdownStyles(onLinkPress: (href: string) => void): MarkdownStyleSe
           false,
           true,
         ),
+        codeBlockAppearance: assistantCodeBlockAppearance,
         nativeTextStyle: {
           color: markdownBodyColor,
           strongColor: markdownStrongColor,
@@ -807,9 +1025,198 @@ function useMarkdownStyles(onLinkPress: (href: string) => void): MarkdownStyleSe
   ]);
 }
 
+type AssistantMessageCodeBlockContext = {
+  readonly environmentId: EnvironmentId;
+  readonly markdownStyles: MarkdownStyleSet;
+  readonly onOpenQuickActionTerminal: (terminalId: string) => void;
+  readonly onRunQuickAction: (action: OrchestrationQuickAction) => void;
+  readonly onQuickActionStatusChange: (
+    actionId: string,
+    status: MobileCommandQuickActionExecutionStatus,
+  ) => void;
+  readonly quickActions: ReadonlyArray<OrchestrationQuickAction>;
+  readonly quickActionStates: Readonly<Record<string, MobileCommandQuickActionState>>;
+  readonly threadId: ThreadId;
+};
+
+type NitroCodeBlockRendererProps = Parameters<NonNullable<CustomRenderers["code_block"]>>[0];
+
+function renderAssistantMessageCodeBlock(
+  context: AssistantMessageCodeBlockContext,
+  { content = "", language }: NitroCodeBlockRendererProps,
+) {
+  const quickAction = context.quickActions.find(
+    (action) => action.command.trim() === content.trim(),
+  );
+  return (
+    <MarkdownCodeBlock
+      {...context.markdownStyles.codeBlockAppearance}
+      content={content}
+      environmentId={context.environmentId}
+      language={language}
+      onOpenQuickActionTerminal={context.onOpenQuickActionTerminal}
+      onRunQuickAction={context.onRunQuickAction}
+      onQuickActionStatusChange={context.onQuickActionStatusChange}
+      {...(quickAction === undefined ? {} : { quickAction })}
+      {...(quickAction === undefined || context.quickActionStates[quickAction.id] === undefined
+        ? {}
+        : { quickActionState: context.quickActionStates[quickAction.id] })}
+      threadId={context.threadId}
+    />
+  );
+}
+
+const AssistantMessageMarkdown = memo(function AssistantMessageMarkdown(props: {
+  readonly environmentId: EnvironmentId;
+  readonly markdownStyles: MarkdownStyleSet;
+  readonly messageId: MessageId;
+  readonly onLinkPress: (href: string) => void;
+  readonly onOpenQuickActionTerminal: (terminalId: string) => void;
+  readonly onRunQuickAction: (
+    messageId: MessageId,
+    actionId: string,
+  ) => Promise<CommandQuickActionRunResult | null>;
+  readonly quickActions?: ReadonlyArray<OrchestrationQuickAction>;
+  readonly skills?: ReadonlyArray<SelectableMarkdownSkill>;
+  readonly text: string;
+  readonly threadId: ThreadId;
+}) {
+  const activeQuickActionIdsRef = useRef(new Set<string>());
+  const [quickActionStates, setQuickActionStates] = useState<
+    Record<string, MobileCommandQuickActionState>
+  >(() =>
+    Object.fromEntries(
+      (props.quickActions ?? []).flatMap((action) =>
+        action.execution === undefined
+          ? []
+          : [[action.id, { status: "running" as const, execution: action.execution }]],
+      ),
+    ),
+  );
+  useEffect(() => {
+    setQuickActionStates((current) => {
+      let next = current;
+      for (const action of props.quickActions ?? []) {
+        if (action.execution === undefined) continue;
+        const existing = current[action.id]?.execution;
+        if (
+          existing?.terminalId === action.execution.terminalId &&
+          existing.historyOffset === action.execution.historyOffset
+        ) {
+          continue;
+        }
+        if (next === current) next = { ...current };
+        next[action.id] = { status: "running", execution: action.execution };
+      }
+      return next;
+    });
+  }, [props.quickActions]);
+  const runQuickAction = useCallback(
+    (action: OrchestrationQuickAction) => {
+      if (activeQuickActionIdsRef.current.has(action.id)) return;
+      activeQuickActionIdsRef.current.add(action.id);
+      setQuickActionStates((current) => ({
+        ...current,
+        [action.id]: { status: "starting", execution: null },
+      }));
+      void props
+        .onRunQuickAction(props.messageId, action.id)
+        .then((execution) => {
+          if (execution === null) {
+            activeQuickActionIdsRef.current.delete(action.id);
+            setQuickActionStates((current) => ({
+              ...current,
+              [action.id]: { status: "idle", execution: null },
+            }));
+            return;
+          }
+          setQuickActionStates((current) => ({
+            ...current,
+            [action.id]: { status: "running", execution },
+          }));
+        })
+        .catch(() => {
+          activeQuickActionIdsRef.current.delete(action.id);
+          setQuickActionStates((current) => ({
+            ...current,
+            [action.id]: { status: "idle", execution: null },
+          }));
+        });
+    },
+    [props.messageId, props.onRunQuickAction],
+  );
+  const onQuickActionStatusChange = useCallback(
+    (actionId: string, status: MobileCommandQuickActionExecutionStatus) => {
+      setQuickActionStates((current) => {
+        const state = current[actionId];
+        if (state === undefined || state.status === status) return current;
+        return { ...current, [actionId]: { ...state, status } };
+      });
+    },
+    [],
+  );
+  const renderers = useMemo<CustomRenderers>(() => {
+    if ((props.quickActions?.length ?? 0) === 0) return props.markdownStyles.renderers;
+
+    const context: AssistantMessageCodeBlockContext = {
+      environmentId: props.environmentId,
+      markdownStyles: props.markdownStyles,
+      onOpenQuickActionTerminal: props.onOpenQuickActionTerminal,
+      onRunQuickAction: runQuickAction,
+      onQuickActionStatusChange,
+      quickActions: props.quickActions ?? [],
+      quickActionStates,
+      threadId: props.threadId,
+    };
+    return {
+      ...props.markdownStyles.renderers,
+      code_block: renderAssistantMessageCodeBlock.bind(null, context),
+    };
+  }, [
+    props.environmentId,
+    props.markdownStyles,
+    props.onOpenQuickActionTerminal,
+    props.quickActions,
+    props.threadId,
+    quickActionStates,
+    runQuickAction,
+    onQuickActionStatusChange,
+  ]);
+
+  if ((props.quickActions?.length ?? 0) === 0 && hasNativeSelectableMarkdownText()) {
+    return (
+      <SelectableMarkdownText
+        markdown={props.text}
+        skills={props.skills}
+        textStyle={props.markdownStyles.nativeTextStyle}
+        onLinkPress={props.onLinkPress}
+      />
+    );
+  }
+
+  return (
+    <Markdown
+      options={{ gfm: true }}
+      renderers={renderers}
+      styles={props.markdownStyles.styles}
+      theme={props.markdownStyles.theme}
+    >
+      {props.text}
+    </Markdown>
+  );
+});
+
 function renderFeedEntry(
   info: { item: ThreadFeedEntry; index: number },
-  props: Pick<ThreadFeedProps, "environmentId" | "skills"> & {
+  props: Pick<
+    ThreadFeedProps,
+    | "commandQuickActionsEnabled"
+    | "environmentId"
+    | "threadId"
+    | "onRunCommandQuickAction"
+    | "onOpenCommandQuickActionTerminal"
+    | "skills"
+  > & {
     readonly copiedRowId: string | null;
     readonly expandedWorkRows: Record<string, boolean>;
     readonly terminalAssistantMessageIds: ReadonlySet<string>;
@@ -876,6 +1283,12 @@ function renderFeedEntry(
     const timestampLabel = formatMessageTime(isUser ? message.createdAt : message.updatedAt);
     const attachments = message.attachments ?? [];
     const hasReviewCommentContext = message.text.includes("<review_comment");
+    // A bubble that sizes itself from its content cannot lay out a block whose
+    // intrinsic width overflows `maxWidth`: Android positions the bubble's
+    // children during the unclamped pass and never moves them once the width
+    // is clamped, so the paragraphs around the block end up drawn on top of
+    // each other. Pinning the width removes that pass.
+    const hasWideBlock = hasWideMarkdownBlock(message.text);
     const assistantTurnStillInProgress =
       message.role === "assistant" &&
       props.unsettledTurnId !== null &&
@@ -898,7 +1311,11 @@ function renderFeedEntry(
             style={{
               backgroundColor: userBubbleColor,
               maxWidth: props.userBubbleMaxWidth,
-              ...(hasReviewCommentContext ? { width: props.reviewCommentBubbleWidth } : null),
+              ...(hasReviewCommentContext
+                ? { width: props.reviewCommentBubbleWidth }
+                : hasWideBlock
+                  ? { width: props.userBubbleMaxWidth }
+                  : null),
             }}
           >
             {message.text.trim().length > 0 ? (
@@ -953,23 +1370,22 @@ function renderFeedEntry(
         {...(enterAnimated ? { entering: FadeIn.duration(220) } : {})}
       >
         {message.text.trim().length > 0 ? (
-          hasNativeSelectableMarkdownText() ? (
-            <SelectableMarkdownText
-              markdown={message.text}
-              skills={props.skills}
-              textStyle={styles.nativeTextStyle}
-              onLinkPress={props.onMarkdownLinkPress}
-            />
-          ) : (
-            <Markdown
-              options={{ gfm: true }}
-              renderers={styles.renderers}
-              styles={styles.styles}
-              theme={styles.theme}
-            >
-              {message.text}
-            </Markdown>
-          )
+          <AssistantMessageMarkdown
+            environmentId={props.environmentId}
+            markdownStyles={styles}
+            messageId={message.id}
+            onLinkPress={props.onMarkdownLinkPress}
+            onOpenQuickActionTerminal={props.onOpenCommandQuickActionTerminal}
+            onRunQuickAction={props.onRunCommandQuickAction}
+            quickActions={
+              props.commandQuickActionsEnabled && !message.streaming
+                ? message.quickActions
+                : undefined
+            }
+            skills={props.skills}
+            text={message.text}
+            threadId={props.threadId}
+          />
         ) : null}
         {attachments.map((attachment) => {
           return (
@@ -1750,6 +2166,8 @@ export const ThreadFeed = memo(function ThreadFeed(props: ThreadFeedProps) {
     (info: { item: ThreadFeedEntry; index: number }) =>
       renderFeedEntry(info, {
         environmentId: props.environmentId,
+        threadId: props.threadId,
+        commandQuickActionsEnabled: props.commandQuickActionsEnabled,
         copiedRowId,
         expandedWorkRows,
         terminalAssistantMessageIds,
@@ -1767,6 +2185,8 @@ export const ThreadFeed = memo(function ThreadFeed(props: ThreadFeedProps) {
         reviewCommentBubbleWidth,
         userBubbleMaxWidth,
         skills: props.skills,
+        onRunCommandQuickAction: props.onRunCommandQuickAction,
+        onOpenCommandQuickActionTerminal: props.onOpenCommandQuickActionTerminal,
       }),
     [
       copiedRowId,
@@ -1786,6 +2206,10 @@ export const ThreadFeed = memo(function ThreadFeed(props: ThreadFeedProps) {
       onToggleWorkGroup,
       onToggleWorkRow,
       props.environmentId,
+      props.threadId,
+      props.commandQuickActionsEnabled,
+      props.onRunCommandQuickAction,
+      props.onOpenCommandQuickActionTerminal,
       props.skills,
     ],
   );

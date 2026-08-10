@@ -4,8 +4,8 @@ import type { AtomCommandResult } from "@t3tools/client-runtime/state/runtime";
 import type { EnvironmentId } from "@t3tools/contracts";
 import * as Cause from "effect/Cause";
 import { AsyncResult } from "effect/unstable/reactivity";
-import { useCallback, useState } from "react";
-import { Alert, Pressable, View } from "react-native";
+import { useCallback, useEffect, useState } from "react";
+import { Alert, Pressable, Switch, View } from "react-native";
 import Animated, { FadeIn, FadeOut, LinearTransition } from "react-native-reanimated";
 import { useThemeColor } from "../../lib/useThemeColor";
 
@@ -13,6 +13,9 @@ import { AppText as Text, AppTextInput as TextInput } from "../../components/App
 import { cn } from "../../lib/cn";
 import { copyTextWithHaptic } from "../../lib/copyTextWithHaptic";
 import type { ConnectedEnvironmentSummary } from "../../state/remote-runtime-types";
+import { useEnvironmentServerConfig } from "../../state/entities";
+import { serverEnvironment } from "../../state/server";
+import { useAtomCommand } from "../../state/use-atom-command";
 import { ConnectionStatusDot } from "./ConnectionStatusDot";
 
 function connectionStatusLabel(environment: ConnectedEnvironmentSummary): string | null {
@@ -36,10 +39,18 @@ export function ConnectionEnvironmentRow(props: {
 }) {
   const [label, setLabel] = useState(props.environment.environmentLabel);
   const [url, setUrl] = useState(props.environment.displayUrl);
+  const [pendingQuickActions, setPendingQuickActions] = useState<boolean | null>(null);
+  const serverConfig = useEnvironmentServerConfig(props.environment.environmentId);
+  const updateServerSettings = useAtomCommand(
+    serverEnvironment.updateSettings,
+    "command quick action settings",
+  );
 
   const mutedColor = useThemeColor("--color-icon-subtle");
   const primaryFg = useThemeColor("--color-primary-foreground");
   const dangerFg = useThemeColor("--color-danger-foreground");
+  const activeTrack = String(useThemeColor("--color-switch-active"));
+  const inactiveTrack = String(useThemeColor("--color-secondary-border"));
   const statusLabel = connectionStatusLabel(props.environment);
   const statusTraceId = props.environment.connectionErrorTraceId;
   const hasConnectionFailure = props.environment.connectionError !== null;
@@ -61,6 +72,37 @@ export function ConnectionEnvironmentRow(props: {
       error instanceof Error ? error.message : "The environment could not be updated.",
     );
   }, [label, url, props]);
+  const quickActionsSupported = serverConfig?.environment.capabilities.commandQuickActions === true;
+  const quickActionsEnabled =
+    quickActionsSupported &&
+    (pendingQuickActions ?? serverConfig?.settings.enableCommandQuickActions ?? false);
+
+  useEffect(() => {
+    if (
+      pendingQuickActions !== null &&
+      serverConfig?.settings.enableCommandQuickActions === pendingQuickActions
+    ) {
+      setPendingQuickActions(null);
+    }
+  }, [pendingQuickActions, serverConfig?.settings.enableCommandQuickActions]);
+
+  const handleQuickActionsChange = useCallback(
+    async (enabled: boolean) => {
+      setPendingQuickActions(enabled);
+      const result = await updateServerSettings({
+        environmentId: props.environment.environmentId,
+        input: { patch: { enableCommandQuickActions: enabled } },
+      });
+      if (AsyncResult.isSuccess(result)) return;
+      setPendingQuickActions(null);
+      const error = Cause.squash(result.cause);
+      Alert.alert(
+        "Could not update quick actions",
+        error instanceof Error ? error.message : "The setting could not be updated.",
+      );
+    },
+    [props.environment.environmentId, updateServerSettings],
+  );
 
   return (
     <Animated.View layout={LinearTransition.duration(250)} className="bg-card">
@@ -167,6 +209,28 @@ export function ConnectionEnvironmentRow(props: {
               </View>
             </>
           )}
+
+          <View className="flex-row items-center gap-3 rounded-[14px] border border-input-border bg-input px-3 py-2.5">
+            <SymbolView name="terminal" size={18} tintColor={mutedColor} type="monochrome" />
+            <View className="min-w-0 flex-1">
+              <Text className="text-sm font-t3-bold text-foreground">Command quick actions</Text>
+              <Text className="text-xs text-foreground-muted">
+                {quickActionsSupported
+                  ? "Offer validated terminal commands after final replies."
+                  : "Unavailable on native Windows environments."}
+              </Text>
+            </View>
+            <Switch
+              accessibilityLabel="Enable command quick actions"
+              disabled={
+                serverConfig === null || !quickActionsSupported || pendingQuickActions !== null
+              }
+              ios_backgroundColor={inactiveTrack}
+              onValueChange={(value) => void handleQuickActionsChange(value)}
+              trackColor={{ false: inactiveTrack, true: activeTrack }}
+              value={quickActionsEnabled}
+            />
+          </View>
 
           <View className="flex-row justify-end gap-2">
             {props.environment.isRelayManaged ? null : (

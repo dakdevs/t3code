@@ -1,10 +1,13 @@
-import type {
-  EnvironmentId,
-  TerminalAttachStreamEvent,
-  TerminalMetadataStreamEvent,
-  TerminalSessionSnapshot,
-  TerminalSummary,
-  ThreadId,
+import {
+  COMMAND_QUICK_ACTION_COMPLETION_MARKER,
+  COMMAND_QUICK_ACTION_INPUT_REQUIRED_MARKER,
+  COMMAND_QUICK_ACTION_START_MARKER,
+  type EnvironmentId,
+  type TerminalAttachStreamEvent,
+  type TerminalMetadataStreamEvent,
+  type TerminalSessionSnapshot,
+  type TerminalSummary,
+  type ThreadId,
 } from "@t3tools/contracts";
 
 export interface TerminalSessionState {
@@ -24,6 +27,13 @@ export interface TerminalBufferState {
   readonly updatedAt: string | null;
   readonly version: number;
 }
+
+export type InlineQuickActionExecutionStatus =
+  | "running"
+  | "input-required"
+  | "finished"
+  | "failed"
+  | "error";
 
 export interface KnownTerminalSessionTarget {
   readonly environmentId: EnvironmentId;
@@ -63,8 +73,207 @@ export const EMPTY_TERMINAL_SESSION_STATE = Object.freeze<TerminalSessionState>(
 });
 
 export const DEFAULT_MAX_TERMINAL_BUFFER_BYTES = 512 * 1024;
+export const DEFAULT_MAX_INLINE_TERMINAL_OUTPUT_CHARS = 12_000;
 const textEncoder = new TextEncoder();
 const textDecoder = new TextDecoder();
+
+function applyTerminalBackspaces(input: string): string {
+  const output: string[] = [];
+  for (const character of input) {
+    if (character !== "\b") {
+      output.push(character);
+      continue;
+    }
+    if (output.at(-1) !== "\n") {
+      output.pop();
+    }
+  }
+  return output.join("");
+}
+
+function normalizeInlineTerminalText(buffer: string, historyOffset: number): string {
+  const plain = buffer
+    .slice(Math.max(0, historyOffset))
+    // CSI and OSC sequences carry terminal presentation, not useful inline text.
+    // eslint-disable-next-line no-control-regex
+    .replace(/\x1b\[[0-?]*[ -/]*[@-~]|\x1b\].*?(?:\x07|\x1b\\)/gs, "");
+  return (
+    applyTerminalBackspaces(plain)
+      .replace(/\r\n/g, "\n")
+      .replace(/\r/g, "\n")
+      // Preserve newlines and tabs while dropping remaining terminal controls.
+      // eslint-disable-next-line no-control-regex
+      .replace(/[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]/g, "")
+      .replace(/^\n+|\n+$/g, "")
+  );
+}
+
+function boundInlineTerminalOutput(output: string, maxChars: number): string {
+  if (maxChars <= 0) return "";
+  if (output.length <= maxChars) return output;
+  return `[Earlier output truncated]\n${output.slice(-maxChars)}`;
+}
+
+function trimQuickActionShellTranscript(
+  output: string,
+  command: string,
+  terminalIdle: boolean,
+): string {
+  let lines = output.split("\n");
+  const outputStartIndex = lines.findLastIndex(
+    (line) => line.trim() === COMMAND_QUICK_ACTION_START_MARKER,
+  );
+  if (outputStartIndex >= 0) {
+    lines = lines.slice(outputStartIndex + 1);
+  } else {
+    const commandLead = command
+      .split("\n")
+      .map((line) => line.trim())
+      .find((line) => line.length > 0);
+    if (commandLead !== undefined) {
+      let lastEchoIndex = -1;
+      for (let index = 0; index < Math.min(lines.length, 12); index += 1) {
+        const line = lines[index]?.trim() ?? "";
+        if (line === commandLead || line.endsWith(` ${commandLead}`)) {
+          lastEchoIndex = index;
+        }
+        if (
+          line.includes(COMMAND_QUICK_ACTION_COMPLETION_MARKER) &&
+          !line.startsWith(COMMAND_QUICK_ACTION_COMPLETION_MARKER)
+        ) {
+          lastEchoIndex = index;
+        }
+        if (line.endsWith("n';fi")) {
+          lastEchoIndex = index;
+        }
+      }
+      if (lastEchoIndex >= 0) {
+        lines = lines.slice(lastEchoIndex + 1);
+        if (/^["']+$/.test(lines[0]?.trim() ?? "")) lines.shift();
+      }
+    }
+  }
+
+  while (lines[0]?.trim().length === 0) lines.shift();
+  while (lines.at(-1)?.trim().length === 0) lines.pop();
+
+  if (terminalIdle) {
+    const promptLine = lines.at(-1)?.trim() ?? "";
+    const markerOnly = /^[$#>%❯➜]$/.test(promptLine);
+    const promptWithInput = /^[$#>%❯➜]\s+\S/.test(promptLine);
+    const looksLikePrompt = markerOnly || promptWithInput || /(?:^|\s)[$#>%❯➜]$/.test(promptLine);
+    if (looksLikePrompt) {
+      lines.pop();
+      if (markerOnly || promptWithInput) {
+        let decorationIndex = lines.length - 1;
+        while (decorationIndex >= 0 && lines[decorationIndex]?.trim().length === 0) {
+          decorationIndex -= 1;
+        }
+        if (decorationIndex > 0 && lines[decorationIndex - 1]?.trim().length === 0) {
+          lines.length = decorationIndex - 1;
+        }
+      }
+      while (lines.at(-1)?.trim().length === 0) lines.pop();
+    }
+  }
+
+  return lines.join("\n");
+}
+
+function stripQuickActionCompletionMarker(output: string): string {
+  return output
+    .split("\n")
+    .filter((line) => {
+      const trimmed = line.trim();
+      return (
+        !trimmed.startsWith(COMMAND_QUICK_ACTION_COMPLETION_MARKER) &&
+        !trimmed.startsWith(COMMAND_QUICK_ACTION_INPUT_REQUIRED_MARKER)
+      );
+    })
+    .join("\n");
+}
+
+export function readInlineQuickActionInputRequired(
+  buffer: string,
+  historyOffset: number,
+): { readonly signal: string } | null {
+  const output = normalizeInlineTerminalText(buffer, historyOffset);
+  const markerLine = output
+    .split("\n")
+    .findLast((line) => line.trim().startsWith(COMMAND_QUICK_ACTION_INPUT_REQUIRED_MARKER));
+  const signal = markerLine?.trim().slice(COMMAND_QUICK_ACTION_INPUT_REQUIRED_MARKER.length).trim();
+  return signal !== undefined && /^(?:SIG)?[A-Z][A-Z0-9]*$/.test(signal) ? { signal } : null;
+}
+
+export function readInlineQuickActionCompletion(
+  buffer: string,
+  historyOffset: number,
+): { readonly exitCode: number } | null {
+  const output = normalizeInlineTerminalText(buffer, historyOffset);
+  const markerLine = output
+    .split("\n")
+    .findLast((line) => line.trim().startsWith(COMMAND_QUICK_ACTION_COMPLETION_MARKER));
+  if (markerLine === undefined) return null;
+  const encodedExitCode = markerLine.trim().slice(COMMAND_QUICK_ACTION_COMPLETION_MARKER.length);
+  if (!/^\d+$/.test(encodedExitCode)) return null;
+  const exitCode = Number.parseInt(encodedExitCode, 10);
+  return Number.isInteger(exitCode) ? { exitCode } : null;
+}
+
+export function resolveInlineQuickActionExecution(
+  terminal: Pick<TerminalSessionState, "buffer" | "error" | "status" | "version">,
+  historyOffset: number,
+): {
+  readonly completion: { readonly exitCode: number } | null;
+  readonly inputRequired: { readonly signal: string } | null;
+  readonly status: InlineQuickActionExecutionStatus;
+} {
+  const completion =
+    terminal.version === 0 ? null : readInlineQuickActionCompletion(terminal.buffer, historyOffset);
+  const inputRequired =
+    terminal.version === 0 || completion !== null
+      ? null
+      : readInlineQuickActionInputRequired(terminal.buffer, historyOffset);
+  const status: InlineQuickActionExecutionStatus =
+    terminal.error !== null || terminal.status === "error"
+      ? "error"
+      : completion !== null && completion.exitCode !== 0
+        ? "failed"
+        : completion !== null
+          ? "finished"
+          : inputRequired !== null
+            ? "input-required"
+            : terminal.status === "exited" || terminal.status === "closed"
+              ? "error"
+              : "running";
+  return { completion, inputRequired, status };
+}
+
+export function formatInlineTerminalOutput(
+  buffer: string,
+  historyOffset: number,
+  maxChars = DEFAULT_MAX_INLINE_TERMINAL_OUTPUT_CHARS,
+): string {
+  return boundInlineTerminalOutput(normalizeInlineTerminalText(buffer, historyOffset), maxChars);
+}
+
+export function formatInlineQuickActionOutput(
+  buffer: string,
+  historyOffset: number,
+  options: {
+    readonly command: string;
+    readonly terminalIdle: boolean;
+    readonly maxChars?: number;
+  },
+): string {
+  const output = stripQuickActionCompletionMarker(
+    normalizeInlineTerminalText(buffer, historyOffset),
+  );
+  return boundInlineTerminalOutput(
+    trimQuickActionShellTranscript(output, options.command, options.terminalIdle),
+    options.maxChars ?? DEFAULT_MAX_INLINE_TERMINAL_OUTPUT_CHARS,
+  );
+}
 
 function trimBufferToBytes(buffer: string, maxBufferBytes: number): string {
   if (maxBufferBytes <= 0) {

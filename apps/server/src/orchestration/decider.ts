@@ -973,6 +973,9 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
         payload: {
           threadId: command.threadId,
           messageId: command.message.messageId,
+          ...(command.providerContext !== undefined
+            ? { providerContext: command.providerContext }
+            : {}),
           ...(command.modelSelection !== undefined
             ? { modelSelection: command.modelSelection }
             : {}),
@@ -1263,6 +1266,51 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
           streaming: false,
           createdAt: command.createdAt,
           updatedAt: command.createdAt,
+        },
+      };
+    }
+
+    case "thread.message.quick-actions.set": {
+      yield* requireThread({
+        readModel,
+        command,
+        threadId: command.threadId,
+      });
+      return {
+        ...(yield* withEventBase({
+          aggregateKind: "thread",
+          aggregateId: command.threadId,
+          occurredAt: command.createdAt,
+          commandId: command.commandId,
+        })),
+        type: "thread.message-quick-actions-set",
+        payload: {
+          threadId: command.threadId,
+          messageId: command.messageId,
+          quickActions: command.quickActions,
+          updatedAt: command.createdAt,
+        },
+      };
+    }
+
+    case "thread.quick-actions.detection.request": {
+      yield* requireThread({
+        readModel,
+        command,
+        threadId: command.threadId,
+      });
+      return {
+        ...(yield* withEventBase({
+          aggregateKind: "thread",
+          aggregateId: command.threadId,
+          occurredAt: command.createdAt,
+          commandId: command.commandId,
+        })),
+        type: "thread.quick-actions-detection-requested",
+        payload: {
+          threadId: command.threadId,
+          turnId: command.turnId,
+          requestedAt: command.createdAt,
         },
       };
     }

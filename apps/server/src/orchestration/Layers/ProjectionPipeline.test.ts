@@ -241,6 +241,86 @@ it.layer(BaseTestLayer)("OrchestrationProjectionPipeline", (it) => {
   );
 });
 
+it.layer(Layer.fresh(makeProjectionPipelinePrefixedTestLayer("t3-quick-action-state-test-")))(
+  "OrchestrationProjectionPipeline",
+  (it) => {
+    it.effect("persists a targeted quick-action update without replacing message content", () =>
+      Effect.gen(function* () {
+        const projectionPipeline = yield* OrchestrationProjectionPipeline;
+        const eventStore = yield* OrchestrationEventStore;
+        const sql = yield* SqlClient.SqlClient;
+        const now = "2026-08-10T12:00:00.000Z";
+
+        yield* eventStore.append({
+          type: "thread.message-sent",
+          eventId: EventId.make("event-quick-action-message"),
+          aggregateKind: "thread",
+          aggregateId: ThreadId.make("thread-quick-action-state"),
+          occurredAt: now,
+          commandId: CommandId.make("command-quick-action-message"),
+          causationEventId: null,
+          correlationId: CommandId.make("command-quick-action-message"),
+          metadata: {},
+          payload: {
+            threadId: ThreadId.make("thread-quick-action-state"),
+            messageId: MessageId.make("message-quick-action-state"),
+            role: "assistant",
+            text: "Run this command.",
+            turnId: null,
+            streaming: false,
+            createdAt: now,
+            updatedAt: now,
+          },
+        });
+        yield* eventStore.append({
+          type: "thread.message-quick-actions-set",
+          eventId: EventId.make("event-quick-action-state"),
+          aggregateKind: "thread",
+          aggregateId: ThreadId.make("thread-quick-action-state"),
+          occurredAt: now,
+          commandId: CommandId.make("command-quick-action-state"),
+          causationEventId: null,
+          correlationId: CommandId.make("command-quick-action-state"),
+          metadata: {},
+          payload: {
+            threadId: ThreadId.make("thread-quick-action-state"),
+            messageId: MessageId.make("message-quick-action-state"),
+            quickActions: [
+              {
+                id: "code-block-1",
+                label: "Run git status",
+                command: "git status --short",
+                execution: { terminalId: "term-2", historyOffset: 42 },
+              },
+            ],
+            updatedAt: now,
+          },
+        });
+
+        yield* projectionPipeline.bootstrap;
+
+        const rows = yield* sql<{
+          readonly text: string;
+          readonly quickActionsJson: string | null;
+        }>`
+          SELECT
+            text,
+            quick_actions_json AS "quickActionsJson"
+          FROM projection_thread_messages
+          WHERE message_id = 'message-quick-action-state'
+        `;
+        assert.deepEqual(rows, [
+          {
+            text: "Run this command.",
+            quickActionsJson:
+              '[{"id":"code-block-1","label":"Run git status","command":"git status --short","execution":{"terminalId":"term-2","historyOffset":42}}]',
+          },
+        ]);
+      }),
+    );
+  },
+);
+
 it.layer(Layer.fresh(makeProjectionPipelinePrefixedTestLayer("t3-base-")))(
   "OrchestrationProjectionPipeline",
   (it) => {

@@ -7,6 +7,7 @@ import {
   OrchestrationCheckpointFile,
   OrchestrationProposedPlanId,
   OrchestrationReadModel,
+  OrchestrationQuickAction,
   OrchestrationThreadSearchSource,
   OrchestrationShellSnapshot,
   OrchestrationThread,
@@ -79,6 +80,7 @@ const ProjectionThreadMessageDbRowSchema = ProjectionThreadMessage.mapFields(
   Struct.assign({
     isStreaming: Schema.Number,
     attachments: Schema.NullOr(Schema.fromJsonString(Schema.Array(ChatAttachment))),
+    quickActions: Schema.NullOr(Schema.fromJsonString(Schema.Array(OrchestrationQuickAction))),
   }),
 );
 const ProjectionThreadProposedPlanDbRowSchema = ProjectionThreadProposedPlan;
@@ -528,6 +530,7 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
           role,
           text,
           attachments_json AS "attachments",
+          quick_actions_json AS "quickActions",
           is_streaming AS "isStreaming",
           created_at AS "createdAt",
           updated_at AS "updatedAt"
@@ -971,6 +974,7 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
           role,
           text,
           attachments_json AS "attachments",
+          quick_actions_json AS "quickActions",
           is_streaming AS "isStreaming",
           created_at AS "createdAt",
           updated_at AS "updatedAt"
@@ -1125,6 +1129,7 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
           AND sequence <= ${maxSequence}
           AND event_type IN (
             'thread.message-sent',
+            'thread.message-quick-actions-set',
             'thread.proposed-plan-upserted',
             'thread.activity-appended',
             'thread.turn-diff-completed',
@@ -1197,6 +1202,7 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
           role,
           text,
           attachments_json AS "attachments",
+          quick_actions_json AS "quickActions",
           is_streaming AS "isStreaming",
           created_at AS "createdAt",
           updated_at AS "updatedAt"
@@ -1433,6 +1439,7 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
                   role: row.role,
                   text: row.text,
                   ...(row.attachments !== null ? { attachments: row.attachments } : {}),
+                  ...(row.quickActions !== null ? { quickActions: row.quickActions } : {}),
                   turnId: row.turnId,
                   streaming: row.isStreaming === 1,
                   createdAt: row.createdAt,
@@ -2478,7 +2485,10 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
             updatedAt: row.updatedAt,
           };
           if (row.attachments !== null) {
-            return Object.assign(message, { attachments: row.attachments });
+            Object.assign(message, { attachments: row.attachments });
+          }
+          if (row.quickActions !== null) {
+            Object.assign(message, { quickActions: row.quickActions });
           }
           return message;
         }),

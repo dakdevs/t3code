@@ -488,6 +488,31 @@ export function projectEvent(
         })),
       );
 
+    case "thread.message-quick-actions-set": {
+      const thread = nextBase.threads.find((entry) => entry.id === event.payload.threadId);
+      if (
+        thread === undefined ||
+        !thread.messages.some((entry) => entry.id === event.payload.messageId)
+      ) {
+        return Effect.succeed(nextBase);
+      }
+      return Effect.succeed({
+        ...nextBase,
+        threads: updateThread(nextBase.threads, event.payload.threadId, {
+          messages: thread.messages.map((entry) =>
+            entry.id === event.payload.messageId
+              ? {
+                  ...entry,
+                  quickActions: event.payload.quickActions,
+                  updatedAt: event.payload.updatedAt,
+                }
+              : entry,
+          ),
+          updatedAt: event.occurredAt,
+        }),
+      });
+    }
+
     case "thread.message-sent":
       return Effect.gen(function* () {
         const payload = yield* decodeForEvent(

@@ -1271,18 +1271,11 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
     }
 
     case "thread.message.quick-actions.set": {
-      const thread = yield* requireThread({
+      yield* requireThread({
         readModel,
         command,
         threadId: command.threadId,
       });
-      const message = thread.messages.find((entry) => entry.id === command.messageId);
-      if (!message || message.role !== "assistant") {
-        return yield* new OrchestrationCommandInvariantError({
-          commandType: command.type,
-          detail: `Assistant message '${command.messageId}' was not found.`,
-        });
-      }
       return {
         ...(yield* withEventBase({
           aggregateKind: "thread",
@@ -1290,16 +1283,11 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
           occurredAt: command.createdAt,
           commandId: command.commandId,
         })),
-        type: "thread.message-sent",
+        type: "thread.message-quick-actions-set",
         payload: {
           threadId: command.threadId,
           messageId: command.messageId,
-          role: "assistant",
-          text: "",
           quickActions: command.quickActions,
-          turnId: message.turnId,
-          streaming: false,
-          createdAt: message.createdAt,
           updatedAt: command.createdAt,
         },
       };

@@ -307,7 +307,7 @@ describe("applyThreadDetailEvent", () => {
     });
   });
 
-  describe("thread.message-sent", () => {
+  describe("message events", () => {
     it("appends a new message", () => {
       const result = applyThreadDetailEvent(baseThread, {
         ...baseEventFields,
@@ -377,7 +377,7 @@ describe("applyThreadDetailEvent", () => {
       }
     });
 
-    it("applies quick actions from a metadata-only message update", () => {
+    it("applies a targeted quick-action update without replacing message content", () => {
       const threadWithMessage: OrchestrationThread = {
         ...baseThread,
         messages: [
@@ -399,12 +399,10 @@ describe("applyThreadDetailEvent", () => {
         occurredAt: "2026-04-01T06:01:00.000Z",
         aggregateKind: "thread",
         aggregateId: ThreadId.make("thread-1"),
-        type: "thread.message-sent",
+        type: "thread.message-quick-actions-set",
         payload: {
           threadId: ThreadId.make("thread-1"),
           messageId: MessageId.make("msg-quick-action"),
-          role: "assistant",
-          text: "",
           quickActions: [
             {
               id: "code-block-1",
@@ -413,9 +411,6 @@ describe("applyThreadDetailEvent", () => {
               execution: { terminalId: "term-2", historyOffset: 42 },
             },
           ],
-          turnId: TurnId.make("turn-quick-action"),
-          streaming: false,
-          createdAt: "2026-04-01T06:00:00.000Z",
           updatedAt: "2026-04-01T06:01:00.000Z",
         },
       });

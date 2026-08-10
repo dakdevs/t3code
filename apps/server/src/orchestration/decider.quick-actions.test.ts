@@ -92,7 +92,7 @@ const readModelWithAssistantMessage = Effect.gen(function* () {
 });
 
 it.layer(NodeServices.layer)("quick action decider commands", (it) => {
-  it.effect("persists detected actions as an assistant message update", () =>
+  it.effect("emits a targeted quick-action update", () =>
     Effect.gen(function* () {
       const result = yield* decideOrchestrationCommand({
         readModel: yield* readModelWithAssistantMessage,
@@ -114,10 +114,10 @@ it.layer(NodeServices.layer)("quick action decider commands", (it) => {
       });
       const event = Array.isArray(result) ? result[0] : result;
       expect(event).toMatchObject({
-        type: "thread.message-sent",
+        type: "thread.message-quick-actions-set",
         payload: {
+          threadId,
           messageId,
-          text: "",
           quickActions: [
             {
               id: "code-block-1",
@@ -126,8 +126,114 @@ it.layer(NodeServices.layer)("quick action decider commands", (it) => {
               execution: { terminalId: "term-2", historyOffset: 17 },
             },
           ],
+          updatedAt: now,
         },
       });
+    }),
+  );
+
+  it.effect("updates a durable message outside the aggregate message window", () =>
+    Effect.gen(function* () {
+      const readModel = yield* readModelWithAssistantMessage;
+      const result = yield* decideOrchestrationCommand({
+        readModel: {
+          ...readModel,
+          threads: readModel.threads.map((thread) =>
+            thread.id === threadId ? { ...thread, messages: [] } : thread,
+          ),
+        },
+        command: {
+          type: "thread.message.quick-actions.set",
+          commandId: CommandId.make("command-set-windowed-quick-actions"),
+          threadId,
+          messageId,
+          quickActions: [
+            {
+              id: "code-block-1",
+              label: "Run printf ok",
+              command: "printf ok",
+              execution: { terminalId: "term-2", historyOffset: 17 },
+            },
+          ],
+          createdAt: now,
+        },
+      });
+      const event = Array.isArray(result) ? result[0] : result;
+      expect(event).toMatchObject({
+        type: "thread.message-quick-actions-set",
+        payload: { threadId, messageId, updatedAt: now },
+      });
+    }),
+  );
+
+  it.effect("projects quick-action execution onto a loaded message", () =>
+    Effect.gen(function* () {
+      const projected = yield* projectEvent(yield* readModelWithAssistantMessage, {
+        sequence: 4,
+        eventId: EventId.make("event-set-quick-action-execution"),
+        aggregateKind: "thread",
+        aggregateId: threadId,
+        type: "thread.message-quick-actions-set",
+        occurredAt: now,
+        commandId: CommandId.make("command-set-quick-action-execution"),
+        causationEventId: null,
+        correlationId: CommandId.make("command-set-quick-action-execution"),
+        metadata: {},
+        payload: {
+          threadId,
+          messageId,
+          quickActions: [
+            {
+              id: "code-block-1",
+              label: "Run printf ok",
+              command: "printf ok",
+              execution: { terminalId: "term-2", historyOffset: 17 },
+            },
+          ],
+          updatedAt: now,
+        },
+      });
+
+      expect(projected.threads[0]?.messages[0]?.quickActions).toEqual([
+        {
+          id: "code-block-1",
+          label: "Run printf ok",
+          command: "printf ok",
+          execution: { terminalId: "term-2", historyOffset: 17 },
+        },
+      ]);
+    }),
+  );
+
+  it.effect("does not append a missing message for a quick-action update", () =>
+    Effect.gen(function* () {
+      const readModel = yield* readModelWithAssistantMessage;
+      const withoutMessage = {
+        ...readModel,
+        threads: readModel.threads.map((thread) =>
+          thread.id === threadId ? { ...thread, messages: [] } : thread,
+        ),
+      };
+      const projected = yield* projectEvent(withoutMessage, {
+        sequence: 4,
+        eventId: EventId.make("event-set-windowed-quick-action-execution"),
+        aggregateKind: "thread",
+        aggregateId: threadId,
+        type: "thread.message-quick-actions-set",
+        occurredAt: now,
+        commandId: CommandId.make("command-set-windowed-quick-action-execution"),
+        causationEventId: null,
+        correlationId: CommandId.make("command-set-windowed-quick-action-execution"),
+        metadata: {},
+        payload: {
+          threadId,
+          messageId,
+          quickActions: [],
+          updatedAt: now,
+        },
+      });
+
+      expect(projected.threads[0]?.messages).toEqual([]);
     }),
   );
 

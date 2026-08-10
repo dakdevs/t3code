@@ -67,16 +67,31 @@ export const DEFAULT_MAX_INLINE_TERMINAL_OUTPUT_CHARS = 12_000;
 const textEncoder = new TextEncoder();
 const textDecoder = new TextDecoder();
 
+function applyTerminalBackspaces(input: string): string {
+  const output: string[] = [];
+  for (const character of input) {
+    if (character !== "\b") {
+      output.push(character);
+      continue;
+    }
+    if (output.at(-1) !== "\n") {
+      output.pop();
+    }
+  }
+  return output.join("");
+}
+
 export function formatInlineTerminalOutput(
   buffer: string,
   historyOffset: number,
   maxChars = DEFAULT_MAX_INLINE_TERMINAL_OUTPUT_CHARS,
 ): string {
-  const output = buffer
+  const plain = buffer
     .slice(Math.max(0, historyOffset))
     // CSI and OSC sequences carry terminal presentation, not useful inline text.
     // eslint-disable-next-line no-control-regex
-    .replace(/\x1b\[[0-?]*[ -/]*[@-~]|\x1b\].*?(?:\x07|\x1b\\)/gs, "")
+    .replace(/\x1b\[[0-?]*[ -/]*[@-~]|\x1b\].*?(?:\x07|\x1b\\)/gs, "");
+  const output = applyTerminalBackspaces(plain)
     .replace(/\r\n/g, "\n")
     .replace(/\r/g, "\n")
     // Preserve newlines and tabs while dropping remaining terminal controls.

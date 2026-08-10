@@ -44,6 +44,12 @@ describe("terminal session reducers", () => {
     );
   });
 
+  it("applies shell line-editor backspaces instead of displaying duplicated characters", () => {
+    const raw = "\u001b[?2004hg\bgit pull\u001b[?2004l\r\nAlready up to date.\r\n";
+
+    expect(formatInlineTerminalOutput(raw, 0)).toBe("git pull\nAlready up to date.");
+  });
+
   it("prefers live attach status over stale metadata after the attach stream starts", () => {
     const summary = applyTerminalMetadataStreamEvent([], {
       type: "snapshot",

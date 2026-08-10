@@ -108,7 +108,7 @@ import {
   BrowserPreviewUnavailableError,
 } from "../browser/openFileInPreview";
 
-export type CommandQuickActionExecutionStatus = "running" | "finished" | "error";
+export type CommandQuickActionExecutionStatus = "running" | "finished" | "failed" | "error";
 export type CommandQuickActionStatus = "idle" | "starting" | CommandQuickActionExecutionStatus;
 
 export interface CommandQuickActionRenderState {
@@ -717,7 +717,7 @@ function MarkdownCodeBlock({
                         ? `Running ${commandQuickAction.command}`
                         : quickActionStatus === "finished"
                           ? `Finished ${commandQuickAction.command}`
-                          : quickActionStatus === "error"
+                          : quickActionStatus === "failed" || quickActionStatus === "error"
                             ? `Failed ${commandQuickAction.command}`
                             : `Run ${commandQuickAction.command}`
                     }
@@ -728,7 +728,7 @@ function MarkdownCodeBlock({
                   <LoaderCircleIcon className="size-3 animate-spin" />
                 ) : quickActionStatus === "finished" ? (
                   <CheckIcon className="size-3" />
-                ) : quickActionStatus === "error" ? (
+                ) : quickActionStatus === "failed" || quickActionStatus === "error" ? (
                   <CircleAlertIcon className="size-3" />
                 ) : (
                   <PlayIcon className="size-3 fill-current" />

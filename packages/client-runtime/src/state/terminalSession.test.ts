@@ -107,6 +107,12 @@ describe("terminal session reducers", () => {
     expect(readInlineQuickActionCompletion("git pull\r\nDownloading...", 0)).toBeNull();
   });
 
+  it("preserves a failed quick action's exit code", () => {
+    expect(
+      readInlineQuickActionCompletion(`${COMMAND_QUICK_ACTION_COMPLETION_MARKER}7\r\n`, 0),
+    ).toEqual({ exitCode: 7 });
+  });
+
   it("prefers live attach status over stale metadata after the attach stream starts", () => {
     const summary = applyTerminalMetadataStreamEvent([], {
       type: "snapshot",

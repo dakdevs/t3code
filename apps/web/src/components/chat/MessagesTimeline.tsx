@@ -1265,15 +1265,17 @@ function InlineCommandQuickActionOutput({
   const status: CommandQuickActionExecutionStatus =
     terminal.error !== null || terminal.status === "error"
       ? "error"
-      : completion !== null || terminal.status === "exited" || terminal.status === "closed"
-        ? "finished"
-        : "running";
+      : completion !== null && completion.exitCode !== 0
+        ? "failed"
+        : completion !== null || terminal.status === "exited" || terminal.status === "closed"
+          ? "finished"
+          : "running";
   const output =
     terminal.version === 0
       ? ""
       : formatInlineQuickActionOutput(terminal.buffer, execution.historyOffset, {
           command: action.command,
-          terminalIdle: status === "finished",
+          terminalIdle: status === "finished" || status === "failed",
         });
 
   useEffect(() => {
@@ -1296,7 +1298,7 @@ function InlineCommandQuickActionOutput({
           <span
             className={cn(
               "size-1.5 shrink-0 rounded-full",
-              status === "error"
+              status === "error" || status === "failed"
                 ? "bg-destructive"
                 : status === "running"
                   ? "bg-amber-500"
@@ -1304,7 +1306,13 @@ function InlineCommandQuickActionOutput({
             )}
           />
           <span className="font-medium text-foreground">
-            {status === "error" ? "Terminal error" : status === "running" ? "Running" : "Finished"}
+            {status === "error"
+              ? "Terminal error"
+              : status === "failed"
+                ? `Failed · exit code ${completion?.exitCode ?? "unknown"}`
+                : status === "running"
+                  ? "Running"
+                  : "Finished"}
           </span>
           <span className="truncate font-mono text-muted-foreground">{action.command}</span>
         </div>

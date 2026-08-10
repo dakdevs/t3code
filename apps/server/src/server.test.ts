@@ -1401,6 +1401,38 @@ const NodeHttpServerTestWithWsDeflate = HttpServer.layerTestClient.pipe(
 );
 
 it.layer(NodeServices.layer)("server router seam", (it) => {
+  it.effect("routes quick-action updates through the thread detail stream", () =>
+    Effect.sync(() => {
+      const event = {
+        sequence: 1,
+        eventId: EventId.make("event-message-quick-actions-set"),
+        aggregateKind: "thread",
+        aggregateId: defaultThreadId,
+        occurredAt: "2026-01-01T00:00:00.000Z",
+        commandId: null,
+        causationEventId: null,
+        correlationId: null,
+        metadata: {},
+        type: "thread.message-quick-actions-set",
+        payload: {
+          threadId: defaultThreadId,
+          messageId: MessageId.make("message-quick-actions"),
+          quickActions: [
+            {
+              id: "code-block-1",
+              label: "Run git status",
+              command: "git status",
+              execution: { terminalId: "term-1", historyOffset: 42 },
+            },
+          ],
+          updatedAt: "2026-01-01T00:00:00.000Z",
+        },
+      } satisfies Extract<OrchestrationEvent, { type: "thread.message-quick-actions-set" }>;
+
+      assert.isTrue(isThreadDetailEvent(event));
+    }),
+  );
+
   it.effect("parks HTTP ingress until command readiness", () =>
     Effect.gen(function* () {
       const fileSystem = yield* FileSystem.FileSystem;

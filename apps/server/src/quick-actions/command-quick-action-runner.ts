@@ -25,7 +25,10 @@ function formatTerminalContext(label: string, output: string): string {
       line.includes(COMMAND_QUICK_ACTION_COMPLETION_MARKER) &&
       !line.trim().startsWith(COMMAND_QUICK_ACTION_COMPLETION_MARKER),
   );
-  if (wrapperEchoIndex >= 0) lines = lines.slice(wrapperEchoIndex + 1);
+  if (wrapperEchoIndex >= 0) {
+    lines = lines.slice(wrapperEchoIndex + 1);
+    if (/^["']+$/.test(lines[0]?.trim() ?? "")) lines.shift();
+  }
   const normalized = lines
     .filter((line) => !line.includes(COMMAND_QUICK_ACTION_COMPLETION_MARKER))
     .join("\n")
@@ -155,7 +158,7 @@ export const layer = Layer.effect(
         .write({
           threadId: thread.id,
           terminalId: input.terminalId,
-          data: `{ ${action.command}\n}; __t3_code_quick_action_status=$?; printf '\\n${COMMAND_QUICK_ACTION_COMPLETION_MARKER}%s\\n' "$__t3_code_quick_action_status"\r`,
+          data: `{ ${action.command}\n};s=$?;printf '\\n${COMMAND_QUICK_ACTION_COMPLETION_MARKER}%s\\n' $s\r`,
         })
         .pipe(
           Effect.tapError(() => Effect.sync(() => pending.delete(key))),

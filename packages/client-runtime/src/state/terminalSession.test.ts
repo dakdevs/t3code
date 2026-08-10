@@ -92,6 +92,7 @@ describe("terminal session reducers", () => {
     const raw = [
       "{ git pull\r\n",
       `}; status=$?; printf '${COMMAND_QUICK_ACTION_COMPLETION_MARKER}%s' "$status"\r\n`,
+      '"\r\n',
       "Already up to date.\r\n",
       `${COMMAND_QUICK_ACTION_COMPLETION_MARKER}0\r\n`,
       "$ ",

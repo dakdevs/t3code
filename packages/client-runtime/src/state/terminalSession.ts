@@ -131,6 +131,7 @@ function trimQuickActionShellTranscript(
     }
     if (lastEchoIndex >= 0) {
       lines = lines.slice(lastEchoIndex + 1);
+      if (/^["']+$/.test(lines[0]?.trim() ?? "")) lines.shift();
     }
   }
 

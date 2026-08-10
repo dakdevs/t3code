@@ -132,7 +132,7 @@ it.effect("runs the stored command exactly and exposes output only to a later me
     expect(write).toHaveBeenCalledWith({
       threadId,
       terminalId: "term-1",
-      data: `{ printf ok\n}; __t3_code_quick_action_status=$?; printf '\\n${COMMAND_QUICK_ACTION_COMPLETION_MARKER}%s\\n' "$__t3_code_quick_action_status"\r`,
+      data: `{ printf ok\n};s=$?;printf '\\n${COMMAND_QUICK_ACTION_COMPLETION_MARKER}%s\\n' $s\r`,
     });
     expect(yield* runner.takeAvailableOutputContext(threadId)).toBeUndefined();
 

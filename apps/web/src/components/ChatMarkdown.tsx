@@ -718,42 +718,35 @@ function MarkdownCodeBlock({
         </span>
         <span className="flex items-center gap-0.5" role="toolbar" aria-label="Code block actions">
           {commandQuickAction !== undefined && onRunCommandQuickAction !== undefined ? (
-            <Tooltip>
-              <TooltipTrigger
-                render={
-                  <Button
-                    type="button"
-                    variant="ghost"
-                    size="icon-xs"
-                    className="chat-markdown-chrome-action"
-                    disabled={quickActionStatus !== "idle"}
-                    onClick={handleRunQuickAction}
-                    aria-label={
-                      quickActionLoading
-                        ? `Running ${commandQuickAction.command}`
-                        : quickActionStatus === "finished"
-                          ? `Finished ${commandQuickAction.command}`
-                          : quickActionStatus === "error"
-                            ? `Failed ${commandQuickAction.command}`
-                            : `Run ${commandQuickAction.command}`
-                    }
-                  />
-                }
-              >
-                {quickActionLoading ? (
-                  <LoaderCircleIcon className="size-3 animate-spin" />
-                ) : quickActionStatus === "finished" ? (
-                  <CheckIcon className="size-3" />
-                ) : quickActionStatus === "error" ? (
-                  <CircleAlertIcon className="size-3" />
-                ) : (
-                  <PlayIcon className="size-3 fill-current" />
-                )}
-              </TooltipTrigger>
-              <TooltipPopup side="top">
-                {quickActionLoading ? "Running command" : commandQuickAction.label}
-              </TooltipPopup>
-            </Tooltip>
+            <Button
+              type="button"
+              variant="ghost"
+              size="icon-xs"
+              className="chat-markdown-chrome-action"
+              disabled={quickActionStatus !== "idle"}
+              onPointerDown={(event) => event.stopPropagation()}
+              onClick={handleRunQuickAction}
+              title={quickActionLoading ? "Running command" : commandQuickAction.label}
+              aria-label={
+                quickActionLoading
+                  ? `Running ${commandQuickAction.command}`
+                  : quickActionStatus === "finished"
+                    ? `Finished ${commandQuickAction.command}`
+                    : quickActionStatus === "error"
+                      ? `Failed ${commandQuickAction.command}`
+                      : `Run ${commandQuickAction.command}`
+              }
+            >
+              {quickActionLoading ? (
+                <LoaderCircleIcon className="size-3 animate-spin" />
+              ) : quickActionStatus === "finished" ? (
+                <CheckIcon className="size-3" />
+              ) : quickActionStatus === "error" ? (
+                <CircleAlertIcon className="size-3" />
+              ) : (
+                <PlayIcon className="size-3 fill-current" />
+              )}
+            </Button>
           ) : null}
           <Tooltip>
             <TooltipTrigger

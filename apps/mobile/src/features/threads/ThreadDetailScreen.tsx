@@ -380,7 +380,8 @@ export const ThreadDetailScreen = memo(function ThreadDetailScreen(props: Thread
             onHeaderMaterialVisibilityChange={props.onHeaderMaterialVisibilityChange}
             skills={selectedProviderSkills}
             commandQuickActionsEnabled={
-              props.serverConfig?.settings.enableCommandQuickActions ?? false
+              props.serverConfig?.environment.capabilities.commandQuickActions === true &&
+              (props.serverConfig?.settings.enableCommandQuickActions ?? false)
             }
             loadEarlier={props.loadEarlier ?? null}
             onRunCommandQuickAction={props.onRunCommandQuickAction}

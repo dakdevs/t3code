@@ -6204,7 +6204,10 @@ function ChatViewContent(props: ChatViewProps) {
             <div className="relative flex min-h-0 flex-1 flex-col">
               {/* Messages — LegendList handles virtualization and scrolling internally */}
               <MessagesTimeline
-                commandQuickActionsEnabled={settings.enableCommandQuickActions}
+                commandQuickActionsEnabled={
+                  serverConfig?.environment.capabilities.commandQuickActions === true &&
+                  settings.enableCommandQuickActions
+                }
                 agentPanelModel={agentPanelModel}
                 onOpenAgents={addAgentsSurface}
                 key={activeThread.id}

@@ -2,6 +2,7 @@ import * as NodeServices from "@effect/platform-node/NodeServices";
 import { assert, it } from "@effect/vitest";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
+import { HostProcessPlatform } from "@t3tools/shared/hostProcess";
 
 import {
   detectCommandQuickActions,
@@ -75,6 +76,13 @@ it.layer(NodeServices.layer)("command quick action validation", (it) => {
 
   it.effect("does no command validation when the final response has no fences", () =>
     detectCommandQuickActions(process.cwd(), "Run `bun test` when ready.").pipe(
+      Effect.map((actions) => assert.deepEqual(actions, [])),
+    ),
+  );
+
+  it.effect("does not suggest command quick actions on native Windows", () =>
+    detectCommandQuickActions(process.cwd(), "```powershell\nWrite-Output ready\n```").pipe(
+      Effect.provideService(HostProcessPlatform, "win32"),
       Effect.map((actions) => assert.deepEqual(actions, [])),
     ),
   );

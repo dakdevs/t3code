@@ -11,6 +11,10 @@ export const DEFAULT_TERMINAL_ID = "term-1";
 /** Printed by quick-action shells after the command exits so clients can observe exact completion. */
 export const COMMAND_QUICK_ACTION_COMPLETION_MARKER = "__T3_CODE_QUICK_ACTION_COMPLETE__:";
 
+/** Printed when POSIX job control stops a quick action for terminal access. */
+export const COMMAND_QUICK_ACTION_INPUT_REQUIRED_MARKER =
+  "__T3_CODE_QUICK_ACTION_INPUT_REQUIRED__:";
+
 const TrimmedNonEmptyStringSchema = TrimmedNonEmptyString;
 const TerminalColsSchema = Schema.Int.check(Schema.isGreaterThanOrEqualTo(1)).check(
   Schema.isLessThanOrEqualTo(1000),

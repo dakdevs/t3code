@@ -13,6 +13,7 @@ import {
   Minimize2Icon,
   OctagonAlertIcon,
   PlayIcon,
+  TerminalIcon,
   TriangleAlertIcon,
   WrapTextIcon,
 } from "lucide-react";
@@ -27,6 +28,7 @@ import {
   squashAtomCommandFailure,
   type AtomCommandResult,
 } from "@t3tools/client-runtime/state/runtime";
+import type { InlineQuickActionExecutionStatus } from "@t3tools/client-runtime/state/terminal";
 import * as Cause from "effect/Cause";
 import { AsyncResult } from "effect/unstable/reactivity";
 import React, {
@@ -108,7 +110,7 @@ import {
   BrowserPreviewUnavailableError,
 } from "../browser/openFileInPreview";
 
-export type CommandQuickActionExecutionStatus = "running" | "finished" | "failed" | "error";
+export type CommandQuickActionExecutionStatus = InlineQuickActionExecutionStatus;
 export type CommandQuickActionStatus = "idle" | "starting" | CommandQuickActionExecutionStatus;
 
 export interface CommandQuickActionRenderState {
@@ -717,9 +719,11 @@ function MarkdownCodeBlock({
                         ? `Running ${commandQuickAction.command}`
                         : quickActionStatus === "finished"
                           ? `Finished ${commandQuickAction.command}`
-                          : quickActionStatus === "failed" || quickActionStatus === "error"
-                            ? `Failed ${commandQuickAction.command}`
-                            : `Run ${commandQuickAction.command}`
+                          : quickActionStatus === "input-required"
+                            ? `Input required for ${commandQuickAction.command}`
+                            : quickActionStatus === "failed" || quickActionStatus === "error"
+                              ? `Failed ${commandQuickAction.command}`
+                              : `Run ${commandQuickAction.command}`
                     }
                   />
                 }
@@ -728,6 +732,8 @@ function MarkdownCodeBlock({
                   <LoaderCircleIcon className="size-3 animate-spin" />
                 ) : quickActionStatus === "finished" ? (
                   <CheckIcon className="size-3" />
+                ) : quickActionStatus === "input-required" ? (
+                  <TerminalIcon className="size-3" />
                 ) : quickActionStatus === "failed" || quickActionStatus === "error" ? (
                   <CircleAlertIcon className="size-3" />
                 ) : (
@@ -735,7 +741,11 @@ function MarkdownCodeBlock({
                 )}
               </TooltipTrigger>
               <TooltipPopup side="top">
-                {quickActionLoading ? "Running command" : commandQuickAction.label}
+                {quickActionLoading
+                  ? "Running command"
+                  : quickActionStatus === "input-required"
+                    ? "Input required"
+                    : commandQuickAction.label}
               </TooltipPopup>
             </Tooltip>
           ) : null}

@@ -10,7 +10,7 @@ import {
 import { parseScopedThreadKey } from "@t3tools/client-runtime/environment";
 import {
   formatInlineQuickActionOutput,
-  readInlineQuickActionCompletion,
+  resolveInlineQuickActionExecution,
 } from "@t3tools/client-runtime/state/terminal";
 import type { AgentPanelModel } from "@t3tools/client-runtime/state/subagentRuntime";
 import {
@@ -1284,24 +1284,16 @@ function InlineCommandQuickActionOutput({
             terminalId: execution.terminalId,
           },
   });
-  const completion =
-    terminal.version === 0
-      ? null
-      : readInlineQuickActionCompletion(terminal.buffer, execution.historyOffset);
-  const status: CommandQuickActionExecutionStatus =
-    terminal.error !== null || terminal.status === "error"
-      ? "error"
-      : completion !== null && completion.exitCode !== 0
-        ? "failed"
-        : completion !== null || terminal.status === "exited" || terminal.status === "closed"
-          ? "finished"
-          : "running";
+  const { completion, status } = resolveInlineQuickActionExecution(
+    terminal,
+    execution.historyOffset,
+  );
   const output =
     terminal.version === 0
       ? ""
       : formatInlineQuickActionOutput(terminal.buffer, execution.historyOffset, {
           command: action.command,
-          terminalIdle: status === "finished" || status === "failed",
+          terminalIdle: status !== "running" && status !== "input-required",
         });
 
   useEffect(() => {
@@ -1326,9 +1318,11 @@ function InlineCommandQuickActionOutput({
               "size-1.5 shrink-0 rounded-full",
               status === "error" || status === "failed"
                 ? "bg-destructive"
-                : status === "running"
-                  ? "bg-amber-500"
-                  : "bg-emerald-500",
+                : status === "input-required"
+                  ? "bg-blue-500"
+                  : status === "running"
+                    ? "bg-amber-500"
+                    : "bg-emerald-500",
             )}
           />
           <span className="font-medium text-foreground">
@@ -1336,19 +1330,38 @@ function InlineCommandQuickActionOutput({
               ? "Terminal error"
               : status === "failed"
                 ? `Failed · exit code ${completion?.exitCode ?? "unknown"}`
-                : status === "running"
-                  ? "Running"
-                  : "Finished"}
+                : status === "input-required"
+                  ? "Input required"
+                  : status === "running"
+                    ? "Running"
+                    : "Finished"}
           </span>
           <span className="truncate font-mono text-muted-foreground">{action.command}</span>
         </div>
+        {status === "input-required" ? (
+          <Button
+            type="button"
+            variant="ghost"
+            size="sm"
+            className="h-7 shrink-0 gap-1.5 px-2 text-xs"
+            onClick={() => ctx.onOpenCommandQuickActionTerminal(execution.terminalId)}
+          >
+            <TerminalIcon className="size-3.5" />
+            Open terminal
+          </Button>
+        ) : null}
       </div>
       <pre
         ref={outputRef}
         className="max-h-44 overflow-auto whitespace-pre-wrap break-words px-3 py-2 font-mono text-[11px] text-foreground/85 leading-relaxed"
       >
         {terminal.error ??
-          (output || (status === "running" ? "Waiting for output…" : "No output."))}
+          (output ||
+            (status === "running"
+              ? "Waiting for output…"
+              : status === "input-required"
+                ? "Open the terminal to continue."
+                : "No output."))}
       </pre>
     </div>
   );

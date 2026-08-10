@@ -76,7 +76,11 @@ import {
 } from "../../providerInstances";
 import { ensureLocalApi, readLocalApi } from "../../localApi";
 import { isMacPlatform } from "../../lib/utils";
-import { primaryServerObservabilityAtom, primaryServerProvidersAtom } from "../../state/server";
+import {
+  primaryServerConfigAtom,
+  primaryServerObservabilityAtom,
+  primaryServerProvidersAtom,
+} from "../../state/server";
 import { useProjects } from "../../state/entities";
 import { useArchivedThreadSnapshots } from "../../lib/archivedThreadsState";
 import { formatRelativeTimeLabel } from "../../timestampFormat";
@@ -1699,6 +1703,9 @@ export function GeneralSettingsPanel() {
   );
   const observability = useAtomValue(primaryServerObservabilityAtom);
   const serverProviders = useAtomValue(primaryServerProvidersAtom);
+  const serverConfig = useAtomValue(primaryServerConfigAtom);
+  const commandQuickActionsSupported =
+    serverConfig?.environment.capabilities.commandQuickActions === true;
   const diagnosticsDescription = formatDiagnosticsDescription({
     localTracingEnabled: observability?.localTracingEnabled ?? false,
     otlpTracesEnabled: observability?.otlpTracesEnabled ?? false,
@@ -2158,10 +2165,15 @@ export function GeneralSettingsPanel() {
 
         <SettingsRow
           {...searchableSetting("command-quick-actions")}
-          description="Detect valid runnable command blocks in final agent replies and offer them as terminal actions. Commands only run when clicked."
+          description={
+            commandQuickActionsSupported
+              ? "Detect valid runnable command blocks in final agent replies and offer them as terminal actions. Commands only run when clicked."
+              : "Command quick actions require a macOS, Linux, or WSL environment and are unavailable on native Windows."
+          }
           control={
             <Switch
-              checked={settings.enableCommandQuickActions}
+              checked={commandQuickActionsSupported && settings.enableCommandQuickActions}
+              disabled={!commandQuickActionsSupported}
               onCheckedChange={(checked) =>
                 updateSettings({ enableCommandQuickActions: Boolean(checked) })
               }

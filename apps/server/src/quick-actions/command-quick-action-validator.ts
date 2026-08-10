@@ -284,6 +284,9 @@ export const validateCommandQuickActions = Effect.fn(
 export const detectCommandQuickActions = Effect.fn(
   "commandQuickActionValidator.detectCommandQuickActions",
 )(function* (cwd: string, finalResponse: string) {
+  const platform = yield* HostProcessPlatform;
+  if (platform === "win32") return [];
+
   const candidates = extractCommandCodeBlocks(finalResponse).map((block) => ({
     id: `code-block-${block.index + 1}`,
     label: quickActionLabel(block.command),

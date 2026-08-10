@@ -1,11 +1,13 @@
 import {
   COMMAND_QUICK_ACTION_COMPLETION_MARKER,
+  COMMAND_QUICK_ACTION_INPUT_REQUIRED_MARKER,
   CommandQuickActionRunError,
   type CommandQuickActionRunInput,
   type CommandQuickActionRunResult,
   type OrchestrationQuickAction,
   type ThreadId,
 } from "@t3tools/contracts";
+import { HostProcessPlatform } from "@t3tools/shared/hostProcess";
 import { projectScriptRuntimeEnv } from "@t3tools/shared/projectScripts";
 import * as Clock from "effect/Clock";
 import * as Context from "effect/Context";
@@ -19,6 +21,27 @@ import { TerminalManager } from "../terminal/Manager.ts";
 const MAX_CONTEXT_CHARS = 20_000;
 const MAX_PENDING_AGE_MS = 24 * 60 * 60 * 1_000;
 
+function quoteShellWord(value: string): string {
+  return `'${value.replaceAll("'", `'"'"'`)}'`;
+}
+
+export function buildCommandQuickActionShellInput(command: string): string {
+  const supervisor =
+    `set -m;eval "$T3_CODE_QUICK_ACTION" & p=$!;wait "$p";s=$?;` +
+    `if [ "$(jobs -s -p)" = "$p" ];then ` +
+    `signal="$(kill -l "$s" 2>/dev/null || printf STOP)";` +
+    `printf '\\n${COMMAND_QUICK_ACTION_INPUT_REQUIRED_MARKER}%s\\n' "$signal";` +
+    `fg %1 >/dev/null;s=$?;fi;` +
+    `printf '\\n${COMMAND_QUICK_ACTION_COMPLETION_MARKER}%s\\n' "$s"`;
+  const unavailable = `printf '\\n${COMMAND_QUICK_ACTION_COMPLETION_MARKER}127\\n'`;
+  return (
+    `if command -v bash >/dev/null 2>&1;then ` +
+    `T3_CODE_QUICK_ACTION=${quoteShellWord(command)} ` +
+    `bash --noprofile --norc -c ${quoteShellWord(supervisor)};` +
+    `else ${unavailable};fi\r`
+  );
+}
+
 function formatTerminalContext(label: string, output: string): string {
   let lines = output.replace(/\r\n/g, "\n").split("\n");
   const wrapperEchoIndex = lines.findIndex(
@@ -31,7 +54,11 @@ function formatTerminalContext(label: string, output: string): string {
     if (/^["']+$/.test(lines[0]?.trim() ?? "")) lines.shift();
   }
   const normalized = lines
-    .filter((line) => !line.includes(COMMAND_QUICK_ACTION_COMPLETION_MARKER))
+    .filter(
+      (line) =>
+        !line.includes(COMMAND_QUICK_ACTION_COMPLETION_MARKER) &&
+        !line.includes(COMMAND_QUICK_ACTION_INPUT_REQUIRED_MARKER),
+    )
     .join("\n")
     .replace(/^\n+|\n+$/g, "");
   const bounded =
@@ -88,6 +115,7 @@ export const layer = Layer.effect(
   Effect.gen(function* () {
     const query = yield* ProjectionSnapshotQuery;
     const terminals = yield* TerminalManager;
+    const platform = yield* HostProcessPlatform;
     const pending = new Map<
       string,
       {
@@ -102,6 +130,13 @@ export const layer = Layer.effect(
     const run = Effect.fn("CommandQuickActionRunner.run")(function* (
       input: CommandQuickActionRunInput,
     ): Effect.fn.Return<CommandQuickActionRunResult, CommandQuickActionRunError> {
+      if (platform === "win32") {
+        return yield* new CommandQuickActionRunError({
+          reason: "unavailable",
+          detail: "Command quick actions are unavailable on Windows.",
+        });
+      }
+
       const threadOption = yield* query.getThreadDetailById(input.threadId).pipe(
         Effect.mapError(
           () =>
@@ -167,7 +202,7 @@ export const layer = Layer.effect(
         .write({
           threadId: thread.id,
           terminalId: input.terminalId,
-          data: `{ ${action.command}\n};s=$?;printf '\\n${COMMAND_QUICK_ACTION_COMPLETION_MARKER}%s\\n' $s\r`,
+          data: buildCommandQuickActionShellInput(action.command),
         })
         .pipe(
           Effect.tapError(() => Effect.sync(() => pending.delete(key))),

@@ -72,8 +72,10 @@ export function ConnectionEnvironmentRow(props: {
       error instanceof Error ? error.message : "The environment could not be updated.",
     );
   }, [label, url, props]);
+  const quickActionsSupported = serverConfig?.environment.capabilities.commandQuickActions === true;
   const quickActionsEnabled =
-    pendingQuickActions ?? serverConfig?.settings.enableCommandQuickActions ?? false;
+    quickActionsSupported &&
+    (pendingQuickActions ?? serverConfig?.settings.enableCommandQuickActions ?? false);
 
   useEffect(() => {
     if (
@@ -213,12 +215,16 @@ export function ConnectionEnvironmentRow(props: {
             <View className="min-w-0 flex-1">
               <Text className="text-sm font-t3-bold text-foreground">Command quick actions</Text>
               <Text className="text-xs text-foreground-muted">
-                Offer validated terminal commands after final replies.
+                {quickActionsSupported
+                  ? "Offer validated terminal commands after final replies."
+                  : "Unavailable on native Windows environments."}
               </Text>
             </View>
             <Switch
               accessibilityLabel="Enable command quick actions"
-              disabled={serverConfig === null || pendingQuickActions !== null}
+              disabled={
+                serverConfig === null || !quickActionsSupported || pendingQuickActions !== null
+              }
               ios_backgroundColor={inactiveTrack}
               onValueChange={(value) => void handleQuickActionsChange(value)}
               trackColor={{ false: inactiveTrack, true: activeTrack }}

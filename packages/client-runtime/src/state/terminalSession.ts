@@ -1,5 +1,6 @@
 import {
   COMMAND_QUICK_ACTION_COMPLETION_MARKER,
+  COMMAND_QUICK_ACTION_INPUT_REQUIRED_MARKER,
   type EnvironmentId,
   type TerminalAttachStreamEvent,
   type TerminalMetadataStreamEvent,
@@ -25,6 +26,13 @@ export interface TerminalBufferState {
   readonly updatedAt: string | null;
   readonly version: number;
 }
+
+export type InlineQuickActionExecutionStatus =
+  | "running"
+  | "input-required"
+  | "finished"
+  | "failed"
+  | "error";
 
 export interface KnownTerminalSessionTarget {
   readonly environmentId: EnvironmentId;
@@ -164,8 +172,26 @@ function trimQuickActionShellTranscript(
 function stripQuickActionCompletionMarker(output: string): string {
   return output
     .split("\n")
-    .filter((line) => !line.trim().startsWith(COMMAND_QUICK_ACTION_COMPLETION_MARKER))
+    .filter((line) => {
+      const trimmed = line.trim();
+      return (
+        !trimmed.startsWith(COMMAND_QUICK_ACTION_COMPLETION_MARKER) &&
+        !trimmed.startsWith(COMMAND_QUICK_ACTION_INPUT_REQUIRED_MARKER)
+      );
+    })
     .join("\n");
+}
+
+export function readInlineQuickActionInputRequired(
+  buffer: string,
+  historyOffset: number,
+): { readonly signal: string } | null {
+  const output = normalizeInlineTerminalText(buffer, historyOffset);
+  const markerLine = output
+    .split("\n")
+    .findLast((line) => line.trim().startsWith(COMMAND_QUICK_ACTION_INPUT_REQUIRED_MARKER));
+  const signal = markerLine?.trim().slice(COMMAND_QUICK_ACTION_INPUT_REQUIRED_MARKER.length).trim();
+  return signal !== undefined && /^(?:SIG)?[A-Z][A-Z0-9]*$/.test(signal) ? { signal } : null;
 }
 
 export function readInlineQuickActionCompletion(
@@ -173,13 +199,43 @@ export function readInlineQuickActionCompletion(
   historyOffset: number,
 ): { readonly exitCode: number } | null {
   const output = normalizeInlineTerminalText(buffer, historyOffset);
-  const markerIndex = output.lastIndexOf(COMMAND_QUICK_ACTION_COMPLETION_MARKER);
-  if (markerIndex < 0) return null;
-  const exitCode = Number.parseInt(
-    output.slice(markerIndex + COMMAND_QUICK_ACTION_COMPLETION_MARKER.length),
-    10,
-  );
+  const markerLine = output
+    .split("\n")
+    .findLast((line) => line.trim().startsWith(COMMAND_QUICK_ACTION_COMPLETION_MARKER));
+  if (markerLine === undefined) return null;
+  const encodedExitCode = markerLine.trim().slice(COMMAND_QUICK_ACTION_COMPLETION_MARKER.length);
+  if (!/^\d+$/.test(encodedExitCode)) return null;
+  const exitCode = Number.parseInt(encodedExitCode, 10);
   return Number.isInteger(exitCode) ? { exitCode } : null;
+}
+
+export function resolveInlineQuickActionExecution(
+  terminal: Pick<TerminalSessionState, "buffer" | "error" | "status" | "version">,
+  historyOffset: number,
+): {
+  readonly completion: { readonly exitCode: number } | null;
+  readonly inputRequired: { readonly signal: string } | null;
+  readonly status: InlineQuickActionExecutionStatus;
+} {
+  const completion =
+    terminal.version === 0 ? null : readInlineQuickActionCompletion(terminal.buffer, historyOffset);
+  const inputRequired =
+    terminal.version === 0 || completion !== null
+      ? null
+      : readInlineQuickActionInputRequired(terminal.buffer, historyOffset);
+  const status: InlineQuickActionExecutionStatus =
+    terminal.error !== null || terminal.status === "error"
+      ? "error"
+      : completion !== null && completion.exitCode !== 0
+        ? "failed"
+        : completion !== null
+          ? "finished"
+          : inputRequired !== null
+            ? "input-required"
+            : terminal.status === "exited" || terminal.status === "closed"
+              ? "error"
+              : "running";
+  return { completion, inputRequired, status };
 }
 
 export function formatInlineTerminalOutput(

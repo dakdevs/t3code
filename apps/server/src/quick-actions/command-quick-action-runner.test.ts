@@ -1,6 +1,7 @@
 import { expect, it, vi } from "@effect/vitest";
 import {
   COMMAND_QUICK_ACTION_COMPLETION_MARKER,
+  COMMAND_QUICK_ACTION_INPUT_REQUIRED_MARKER,
   DEFAULT_PROVIDER_INTERACTION_MODE,
   MessageId,
   ProjectId,
@@ -12,10 +13,16 @@ import {
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
+import {
+  HostProcessEnvironment,
+  HostProcessPlatform,
+  HostProcessWorkingDirectory,
+} from "@t3tools/shared/hostProcess";
 
 import * as ProjectionSnapshotQuery from "../orchestration/Services/ProjectionSnapshotQuery.ts";
 import * as TerminalManager from "../terminal/Manager.ts";
 import {
+  buildCommandQuickActionShellInput,
   CommandQuickActionRunner,
   layer,
   withCommandQuickActionExecution,
@@ -89,6 +96,109 @@ it("records an execution on only the matching message action", () => {
   ]);
 });
 
+it("builds a POSIX job-control wrapper without changing the stored command", () => {
+  const input = buildCommandQuickActionShellInput("printf '%s\\n' \"$USER\"");
+
+  expect(input).toContain("set -m");
+  expect(input).toContain('wait "$p"');
+  expect(input).toContain("jobs -s -p");
+  expect(input).toContain(COMMAND_QUICK_ACTION_INPUT_REQUIRED_MARKER);
+  expect(input).toContain(COMMAND_QUICK_ACTION_COMPLETION_MARKER);
+  expect(input).toContain("T3_CODE_QUICK_ACTION='printf '\"'\"'%s\\n'\"'\"' \"$USER\"'");
+  expect(input.endsWith("\r")).toBe(true);
+});
+
+it.effect("detects a real PTY read and continues the same job after terminal input", () =>
+  Effect.gen(function* () {
+    const platform = yield* HostProcessPlatform;
+    if (platform === "win32") return;
+    const cwd = yield* HostProcessWorkingDirectory;
+    const env = yield* HostProcessEnvironment;
+    const nodePty = yield* Effect.promise(() => import("node-pty"));
+    let sentInput = false;
+    const output = yield* Effect.callback<string>((resume) => {
+      const shell = nodePty.spawn("/bin/bash", ["--noprofile", "--norc"], {
+        cwd,
+        cols: 120,
+        rows: 24,
+        env,
+        name: "xterm-256color",
+      });
+      let transcript = "";
+      let settled = false;
+      const inputMarker = new RegExp(
+        `(?:^|\\r?\\n)${COMMAND_QUICK_ACTION_INPUT_REQUIRED_MARKER}(?:SIG)?TTIN(?:\\r?\\n|$)`,
+      );
+      const completionMarker = new RegExp(
+        `(?:^|\\r?\\n)${COMMAND_QUICK_ACTION_COMPLETION_MARKER}0(?:\\r?\\n|$)`,
+      );
+      const dataDisposable = shell.onData((data) => {
+        transcript += data;
+        if (!sentInput && inputMarker.test(transcript)) {
+          sentInput = true;
+          shell.write("Dak\r");
+        }
+        if (!settled && completionMarker.test(transcript)) {
+          settled = true;
+          dataDisposable.dispose();
+          exitDisposable.dispose();
+          shell.kill();
+          resume(Effect.succeed(transcript));
+        }
+      });
+      const exitDisposable = shell.onExit(() => {
+        if (settled) return;
+        settled = true;
+        dataDisposable.dispose();
+        exitDisposable.dispose();
+        resume(Effect.die("PTY exited before the quick action completed"));
+      });
+      shell.write(
+        buildCommandQuickActionShellInput('read -r -p "Name: " name; printf "Hello %s\\n" "$name"'),
+      );
+      return Effect.sync(() => {
+        if (settled) return;
+        settled = true;
+        dataDisposable.dispose();
+        exitDisposable.dispose();
+        shell.kill();
+      });
+    });
+
+    expect(sentInput).toBe(true);
+    expect(output).toContain("Name: ");
+    expect(output).toContain("Hello Dak");
+  }),
+);
+
+it.effect("rejects command quick actions on native Windows before opening a terminal", () => {
+  const open = vi.fn(() => Effect.die("terminal should not open"));
+  const terminalLayer = Layer.succeed(TerminalManager.TerminalManager, {
+    open,
+    inspect: () => Effect.die("unused"),
+    write: () => Effect.die("unused"),
+    attachStream: () => Effect.die("unused"),
+    resize: () => Effect.die("unused"),
+    clear: () => Effect.die("unused"),
+    restart: () => Effect.die("unused"),
+    close: () => Effect.die("unused"),
+    subscribe: () => Effect.die("unused"),
+    subscribeMetadata: () => Effect.die("unused"),
+  });
+  const testLayer = layer.pipe(Layer.provide(queryLayer), Layer.provide(terminalLayer));
+
+  return Effect.gen(function* () {
+    const runner = yield* CommandQuickActionRunner;
+    const error = yield* runner
+      .run({ threadId, messageId, actionId: "code-block-1", terminalId: "term-1" })
+      .pipe(Effect.flip);
+
+    expect(error.reason).toBe("unavailable");
+    expect(error.message).toBe("Command quick actions are unavailable on Windows.");
+    expect(open).not.toHaveBeenCalled();
+  }).pipe(Effect.provide(testLayer), Effect.provideService(HostProcessPlatform, "win32"));
+});
+
 const queryLayer = Layer.succeed(ProjectionSnapshotQuery.ProjectionSnapshotQuery, {
   getCommandReadModel: () => Effect.die("unused"),
   getSnapshot: () => Effect.die("unused"),
@@ -157,7 +267,7 @@ it.effect("runs the stored command exactly and exposes output only to a later me
     expect(write).toHaveBeenCalledWith({
       threadId,
       terminalId: "term-1",
-      data: `{ printf ok\n};s=$?;printf '\\n${COMMAND_QUICK_ACTION_COMPLETION_MARKER}%s\\n' $s\r`,
+      data: buildCommandQuickActionShellInput("printf ok"),
     });
     expect(yield* runner.takeAvailableOutputContext(threadId)).toBeUndefined();
 

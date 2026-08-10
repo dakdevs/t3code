@@ -2,6 +2,7 @@ import { describe, expect, it } from "vite-plus/test";
 
 import {
   COMMAND_QUICK_ACTION_COMPLETION_MARKER,
+  COMMAND_QUICK_ACTION_INPUT_REQUIRED_MARKER,
   EnvironmentId,
   TerminalSessionSnapshot,
   ThreadId,
@@ -15,6 +16,8 @@ import {
   formatInlineQuickActionOutput,
   formatInlineTerminalOutput,
   readInlineQuickActionCompletion,
+  readInlineQuickActionInputRequired,
+  resolveInlineQuickActionExecution,
   selectRunningSubprocessTerminalIds,
 } from "./terminalSession.ts";
 
@@ -108,10 +111,76 @@ describe("terminal session reducers", () => {
     expect(readInlineQuickActionCompletion("git pull\r\nDownloading...", 0)).toBeNull();
   });
 
+  it("does not treat marker text inside the echoed shell wrapper as lifecycle state", () => {
+    const echoed =
+      `printf '${COMMAND_QUICK_ACTION_INPUT_REQUIRED_MARKER}%s' "$signal";` +
+      `printf '${COMMAND_QUICK_ACTION_COMPLETION_MARKER}%s' "$status"\r\n`;
+
+    expect(readInlineQuickActionInputRequired(echoed, 0)).toBeNull();
+    expect(readInlineQuickActionCompletion(echoed, 0)).toBeNull();
+  });
+
   it("preserves a failed quick action's exit code", () => {
     expect(
       readInlineQuickActionCompletion(`${COMMAND_QUICK_ACTION_COMPLETION_MARKER}7\r\n`, 0),
     ).toEqual({ exitCode: 7 });
+  });
+
+  it("detects terminal input requests and hides their shell marker", () => {
+    const raw = ["Name: \r\n", `${COMMAND_QUICK_ACTION_INPUT_REQUIRED_MARKER}TTIN\r\n`].join("");
+
+    expect(readInlineQuickActionInputRequired(raw, 0)).toEqual({ signal: "TTIN" });
+    expect(
+      formatInlineQuickActionOutput(raw, 0, { command: "read name", terminalIdle: false }),
+    ).toBe("Name: ");
+  });
+
+  it("lets exact completion supersede an earlier terminal input request", () => {
+    const raw = [
+      `${COMMAND_QUICK_ACTION_INPUT_REQUIRED_MARKER}TTIN\r\n`,
+      "Dak\r\n",
+      `${COMMAND_QUICK_ACTION_COMPLETION_MARKER}0\r\n`,
+    ].join("");
+
+    expect(readInlineQuickActionInputRequired(raw, 0)).toEqual({ signal: "TTIN" });
+    expect(readInlineQuickActionCompletion(raw, 0)).toEqual({ exitCode: 0 });
+    expect(
+      resolveInlineQuickActionExecution(
+        { buffer: raw, error: null, status: "running", version: 1 },
+        0,
+      ),
+    ).toEqual({ completion: { exitCode: 0 }, inputRequired: null, status: "finished" });
+  });
+
+  it("resolves input, failure, and missing-marker terminal states consistently", () => {
+    expect(
+      resolveInlineQuickActionExecution(
+        {
+          buffer: `${COMMAND_QUICK_ACTION_INPUT_REQUIRED_MARKER}TTIN\r\n`,
+          error: null,
+          status: "running",
+          version: 1,
+        },
+        0,
+      ),
+    ).toEqual({ completion: null, inputRequired: { signal: "TTIN" }, status: "input-required" });
+    expect(
+      resolveInlineQuickActionExecution(
+        {
+          buffer: `${COMMAND_QUICK_ACTION_COMPLETION_MARKER}7\r\n`,
+          error: null,
+          status: "running",
+          version: 1,
+        },
+        0,
+      ),
+    ).toEqual({ completion: { exitCode: 7 }, inputRequired: null, status: "failed" });
+    expect(
+      resolveInlineQuickActionExecution(
+        { buffer: "partial", error: null, status: "closed", version: 1 },
+        0,
+      ).status,
+    ).toBe("error");
   });
 
   it("prefers live attach status over stale metadata after the attach stream starts", () => {

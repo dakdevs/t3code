@@ -11,7 +11,8 @@ import type {
 } from "@t3tools/contracts";
 import {
   formatInlineQuickActionOutput,
-  readInlineQuickActionCompletion,
+  type InlineQuickActionExecutionStatus,
+  resolveInlineQuickActionExecution,
 } from "@t3tools/client-runtime/state/terminal";
 import { CHAT_LIST_ANCHOR_OFFSET, resolveChatListAnchoredEndSpace } from "@t3tools/shared/chatList";
 import { formatElapsed } from "@t3tools/shared/orchestrationTiming";
@@ -271,13 +272,8 @@ type MarkdownCodeBlockAppearance = Pick<
   | "theme"
 >;
 
-type MobileCommandQuickActionStatus =
-  | "idle"
-  | "starting"
-  | "running"
-  | "finished"
-  | "failed"
-  | "error";
+type MobileCommandQuickActionExecutionStatus = InlineQuickActionExecutionStatus;
+type MobileCommandQuickActionStatus = "idle" | "starting" | MobileCommandQuickActionExecutionStatus;
 
 type MobileCommandQuickActionState = {
   readonly status: MobileCommandQuickActionStatus;
@@ -360,9 +356,10 @@ function MarkdownCodeBlock(props: {
   readonly quickActionState?: MobileCommandQuickActionState;
   readonly environmentId?: EnvironmentId;
   readonly onRunQuickAction?: (action: OrchestrationQuickAction) => void;
+  readonly onOpenQuickActionTerminal?: (terminalId: string) => void;
   readonly onQuickActionStatusChange?: (
     actionId: string,
-    status: "running" | "finished" | "failed" | "error",
+    status: MobileCommandQuickActionExecutionStatus,
   ) => void;
   readonly threadId?: ThreadId;
 }) {
@@ -384,24 +381,16 @@ function MarkdownCodeBlock(props: {
         ? null
         : { threadId: props.threadId, terminalId: execution.terminalId },
   });
-  const completion =
-    execution === null || terminal.version === 0
-      ? null
-      : readInlineQuickActionCompletion(terminal.buffer, execution.historyOffset);
-  const status: "running" | "finished" | "failed" | "error" =
-    terminal.error !== null || terminal.status === "error"
-      ? "error"
-      : completion !== null && completion.exitCode !== 0
-        ? "failed"
-        : completion !== null || terminal.status === "exited" || terminal.status === "closed"
-          ? "finished"
-          : "running";
+  const { completion, status } = resolveInlineQuickActionExecution(
+    terminal,
+    execution?.historyOffset ?? 0,
+  );
   const output =
     execution === null || props.quickAction === undefined || terminal.version === 0
       ? ""
       : formatInlineQuickActionOutput(terminal.buffer, execution.historyOffset, {
           command: props.quickAction.command,
-          terminalIdle: status === "finished" || status === "failed",
+          terminalIdle: status !== "running" && status !== "input-required",
         });
   const loading = quickActionStatus === "starting" || quickActionStatus === "running";
   let tokenOffset = 0;
@@ -444,9 +433,11 @@ function MarkdownCodeBlock(props: {
                   ? `Running ${props.quickAction.command}`
                   : quickActionStatus === "idle"
                     ? `Run ${props.quickAction.command}`
-                    : status === "error" || status === "failed"
-                      ? `Failed ${props.quickAction.command}`
-                      : `Finished ${props.quickAction.command}`
+                    : status === "input-required"
+                      ? `Input required for ${props.quickAction.command}`
+                      : status === "error" || status === "failed"
+                        ? `Failed ${props.quickAction.command}`
+                        : `Finished ${props.quickAction.command}`
               }
               accessibilityState={{ disabled: quickActionStatus !== "idle" }}
               disabled={quickActionStatus !== "idle"}
@@ -463,9 +454,11 @@ function MarkdownCodeBlock(props: {
                   name={
                     quickActionStatus === "idle"
                       ? "play.fill"
-                      : status === "error" || status === "failed"
-                        ? "xmark"
-                        : "checkmark"
+                      : status === "input-required"
+                        ? "terminal"
+                        : status === "error" || status === "failed"
+                          ? "xmark"
+                          : "checkmark"
                   }
                   size={15}
                   tintColor={props.copyTintColor}
@@ -552,9 +545,11 @@ function MarkdownCodeBlock(props: {
                 "h-1.5 w-1.5 shrink-0 rounded-full",
                 status === "error" || status === "failed"
                   ? "bg-red-500"
-                  : status === "running"
-                    ? "bg-amber-500"
-                    : "bg-emerald-500",
+                  : status === "input-required"
+                    ? "bg-blue-500"
+                    : status === "running"
+                      ? "bg-amber-500"
+                      : "bg-emerald-500",
               )}
             />
             <Text className="font-t3-medium text-xs text-foreground">
@@ -562,9 +557,11 @@ function MarkdownCodeBlock(props: {
                 ? "Terminal error"
                 : status === "failed"
                   ? `Failed · exit code ${completion?.exitCode ?? "unknown"}`
-                  : status === "running"
-                    ? "Running"
-                    : "Finished"}
+                  : status === "input-required"
+                    ? "Input required"
+                    : status === "running"
+                      ? "Running"
+                      : "Finished"}
             </Text>
             <Text
               numberOfLines={1}
@@ -572,6 +569,22 @@ function MarkdownCodeBlock(props: {
             >
               {props.quickAction.command}
             </Text>
+            {status === "input-required" ? (
+              <Pressable
+                accessibilityRole="button"
+                accessibilityLabel="Open terminal"
+                className="min-h-8 flex-row items-center gap-1.5 rounded-lg px-2 active:opacity-60"
+                onPress={() => props.onOpenQuickActionTerminal?.(execution.terminalId)}
+              >
+                <SymbolView
+                  name="terminal"
+                  size={13}
+                  tintColor={props.copyTintColor}
+                  type="monochrome"
+                />
+                <Text className="font-t3-bold text-xs text-foreground">Open terminal</Text>
+              </Pressable>
+            ) : null}
           </View>
           <ScrollView ref={outputScrollRef} className="max-h-44" nestedScrollEnabled>
             <NativeText
@@ -579,7 +592,12 @@ function MarkdownCodeBlock(props: {
               className="px-3 py-2 font-mono text-[11px] leading-relaxed text-foreground"
             >
               {terminal.error ??
-                (output || (status === "running" ? "Waiting for output…" : "No output."))}
+                (output ||
+                  (status === "running"
+                    ? "Waiting for output…"
+                    : status === "input-required"
+                      ? "Open the terminal to continue."
+                      : "No output."))}
             </NativeText>
           </ScrollView>
         </View>
@@ -1010,10 +1028,11 @@ function useMarkdownStyles(onLinkPress: (href: string) => void): MarkdownStyleSe
 type AssistantMessageCodeBlockContext = {
   readonly environmentId: EnvironmentId;
   readonly markdownStyles: MarkdownStyleSet;
+  readonly onOpenQuickActionTerminal: (terminalId: string) => void;
   readonly onRunQuickAction: (action: OrchestrationQuickAction) => void;
   readonly onQuickActionStatusChange: (
     actionId: string,
-    status: "running" | "finished" | "failed" | "error",
+    status: MobileCommandQuickActionExecutionStatus,
   ) => void;
   readonly quickActions: ReadonlyArray<OrchestrationQuickAction>;
   readonly quickActionStates: Readonly<Record<string, MobileCommandQuickActionState>>;
@@ -1035,6 +1054,7 @@ function renderAssistantMessageCodeBlock(
       content={content}
       environmentId={context.environmentId}
       language={language}
+      onOpenQuickActionTerminal={context.onOpenQuickActionTerminal}
       onRunQuickAction={context.onRunQuickAction}
       onQuickActionStatusChange={context.onQuickActionStatusChange}
       {...(quickAction === undefined ? {} : { quickAction })}
@@ -1051,6 +1071,7 @@ const AssistantMessageMarkdown = memo(function AssistantMessageMarkdown(props: {
   readonly markdownStyles: MarkdownStyleSet;
   readonly messageId: MessageId;
   readonly onLinkPress: (href: string) => void;
+  readonly onOpenQuickActionTerminal: (terminalId: string) => void;
   readonly onRunQuickAction: (
     messageId: MessageId,
     actionId: string,
@@ -1125,7 +1146,7 @@ const AssistantMessageMarkdown = memo(function AssistantMessageMarkdown(props: {
     [props.messageId, props.onRunQuickAction],
   );
   const onQuickActionStatusChange = useCallback(
-    (actionId: string, status: "running" | "finished" | "failed" | "error") => {
+    (actionId: string, status: MobileCommandQuickActionExecutionStatus) => {
       setQuickActionStates((current) => {
         const state = current[actionId];
         if (state === undefined || state.status === status) return current;
@@ -1140,6 +1161,7 @@ const AssistantMessageMarkdown = memo(function AssistantMessageMarkdown(props: {
     const context: AssistantMessageCodeBlockContext = {
       environmentId: props.environmentId,
       markdownStyles: props.markdownStyles,
+      onOpenQuickActionTerminal: props.onOpenQuickActionTerminal,
       onRunQuickAction: runQuickAction,
       onQuickActionStatusChange,
       quickActions: props.quickActions ?? [],
@@ -1153,6 +1175,7 @@ const AssistantMessageMarkdown = memo(function AssistantMessageMarkdown(props: {
   }, [
     props.environmentId,
     props.markdownStyles,
+    props.onOpenQuickActionTerminal,
     props.quickActions,
     props.threadId,
     quickActionStates,
@@ -1352,6 +1375,7 @@ function renderFeedEntry(
             markdownStyles={styles}
             messageId={message.id}
             onLinkPress={props.onMarkdownLinkPress}
+            onOpenQuickActionTerminal={props.onOpenCommandQuickActionTerminal}
             onRunQuickAction={props.onRunCommandQuickAction}
             quickActions={
               props.commandQuickActionsEnabled && !message.streaming

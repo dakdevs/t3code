@@ -7,6 +7,7 @@ import {
   applyTerminalMetadataStreamEvent,
   combineTerminalSessionState,
   EMPTY_TERMINAL_BUFFER_STATE,
+  formatInlineTerminalOutput,
   selectRunningSubprocessTerminalIds,
 } from "./terminalSession.ts";
 
@@ -31,6 +32,18 @@ const BASE_SNAPSHOT: TerminalSessionSnapshot = {
 };
 
 describe("terminal session reducers", () => {
+  it("formats only bounded quick-action output as inline text", () => {
+    const prompt = "prompt> ";
+    const buffer = `${prompt}\u001b[32mgit pull --ff-only\u001b[0m\r\nAlready up to date.\r\n`;
+
+    expect(formatInlineTerminalOutput(buffer, prompt.length)).toBe(
+      "git pull --ff-only\nAlready up to date.",
+    );
+    expect(formatInlineTerminalOutput(buffer, prompt.length, 8)).toBe(
+      "[Earlier output truncated]\nto date.",
+    );
+  });
+
   it("prefers live attach status over stale metadata after the attach stream starts", () => {
     const summary = applyTerminalMetadataStreamEvent([], {
       type: "snapshot",

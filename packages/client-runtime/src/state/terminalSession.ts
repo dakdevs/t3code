@@ -63,8 +63,31 @@ export const EMPTY_TERMINAL_SESSION_STATE = Object.freeze<TerminalSessionState>(
 });
 
 export const DEFAULT_MAX_TERMINAL_BUFFER_BYTES = 512 * 1024;
+export const DEFAULT_MAX_INLINE_TERMINAL_OUTPUT_CHARS = 12_000;
 const textEncoder = new TextEncoder();
 const textDecoder = new TextDecoder();
+
+export function formatInlineTerminalOutput(
+  buffer: string,
+  historyOffset: number,
+  maxChars = DEFAULT_MAX_INLINE_TERMINAL_OUTPUT_CHARS,
+): string {
+  const output = buffer
+    .slice(Math.max(0, historyOffset))
+    // CSI and OSC sequences carry terminal presentation, not useful inline text.
+    // eslint-disable-next-line no-control-regex
+    .replace(/\x1b\[[0-?]*[ -/]*[@-~]|\x1b\].*?(?:\x07|\x1b\\)/gs, "")
+    .replace(/\r\n/g, "\n")
+    .replace(/\r/g, "\n")
+    // Preserve newlines and tabs while dropping remaining terminal controls.
+    // eslint-disable-next-line no-control-regex
+    .replace(/[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]/g, "")
+    .replace(/^\n+|\n+$/g, "");
+
+  if (maxChars <= 0) return "";
+  if (output.length <= maxChars) return output;
+  return `[Earlier output truncated]\n${output.slice(-maxChars)}`;
+}
 
 function trimBufferToBytes(buffer: string, maxBufferBytes: number): string {
   if (maxBufferBytes <= 0) {

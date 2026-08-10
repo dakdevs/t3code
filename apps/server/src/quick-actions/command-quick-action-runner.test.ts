@@ -121,7 +121,9 @@ it.effect("runs the stored command exactly and exposes output only to a later me
 
   return Effect.gen(function* () {
     const runner = yield* CommandQuickActionRunner;
-    yield* runner.run({ threadId, messageId, actionId: "code-block-1", terminalId: "term-1" });
+    expect(
+      yield* runner.run({ threadId, messageId, actionId: "code-block-1", terminalId: "term-1" }),
+    ).toEqual({ terminalId: "term-1", historyOffset: "prompt> ".length });
     expect(write).toHaveBeenCalledWith({
       threadId,
       terminalId: "term-1",

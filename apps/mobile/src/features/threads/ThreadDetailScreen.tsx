@@ -4,6 +4,7 @@ import { useKeyboardChatComposerInset, useKeyboardScrollToEnd } from "@legendapp
 import type { LegendListRef } from "@legendapp/list/react-native";
 import type {
   ApprovalRequestId,
+  CommandQuickActionRunResult,
   EnvironmentId,
   MessageId,
   ModelSelection,
@@ -80,7 +81,11 @@ export interface ThreadDetailScreenProps {
   readonly onStopThread: () => void;
   readonly onSendMessage: () => Promise<MessageId | null>;
   readonly onReconnectEnvironment: () => void;
-  readonly onRunCommandQuickAction: (messageId: MessageId, actionId: string) => Promise<void>;
+  readonly onRunCommandQuickAction: (
+    messageId: MessageId,
+    actionId: string,
+  ) => Promise<CommandQuickActionRunResult | null>;
+  readonly onOpenCommandQuickActionTerminal: (terminalId: string) => void;
   readonly onUpdateThreadModelSelection: (modelSelection: ModelSelection) => void;
   readonly onUpdateThreadRuntimeMode: (runtimeMode: RuntimeMode) => void;
   readonly onUpdateThreadInteractionMode: (interactionMode: ProviderInteractionMode) => void;
@@ -379,6 +384,7 @@ export const ThreadDetailScreen = memo(function ThreadDetailScreen(props: Thread
             }
             loadEarlier={props.loadEarlier ?? null}
             onRunCommandQuickAction={props.onRunCommandQuickAction}
+            onOpenCommandQuickActionTerminal={props.onOpenCommandQuickActionTerminal}
           />
         </View>
       ) : (

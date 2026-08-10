@@ -100,6 +100,7 @@ export type CommandQuickActionRunInput = typeof CommandQuickActionRunInput.Type;
 
 export const CommandQuickActionRunResult = Schema.Struct({
   terminalId: TerminalIdSchema,
+  historyOffset: Schema.Int.check(Schema.isGreaterThanOrEqualTo(0)),
 });
 export type CommandQuickActionRunResult = typeof CommandQuickActionRunResult.Type;
 

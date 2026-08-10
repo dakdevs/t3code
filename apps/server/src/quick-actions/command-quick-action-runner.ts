@@ -142,7 +142,7 @@ export const layer = Layer.effect(
               new CommandQuickActionRunError({ reason: "terminal", detail: error.message }),
           ),
         );
-      return { terminalId: input.terminalId };
+      return { terminalId: input.terminalId, historyOffset: snapshot.history.length };
     });
 
     const takeAvailableOutputContext = Effect.fn(

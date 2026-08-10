@@ -1,5 +1,6 @@
 import {
   type ApprovalRequestId,
+  type CommandQuickActionRunResult,
   DEFAULT_MODEL,
   defaultInstanceIdForDriver,
   type EnvironmentId,
@@ -2889,8 +2890,8 @@ function ChatViewContent(props: ChatViewProps) {
     storeNewTerminal,
   ]);
   const handleRunCommandQuickAction = useCallback(
-    async (messageId: MessageId, actionId: string) => {
-      if (!activeThreadRef || !activeThreadId) return;
+    async (messageId: MessageId, actionId: string): Promise<CommandQuickActionRunResult | null> => {
+      if (!activeThreadRef || !activeThreadId) return null;
       const terminalId = nextTerminalId(allocatableActiveTerminalIds);
       const result = await runCommandQuickAction({
         environmentId,
@@ -2902,12 +2903,11 @@ function ChatViewContent(props: ChatViewProps) {
           activeThreadId,
           error instanceof Error ? error.message : "Failed to run command quick action.",
         );
-        return;
+        return null;
       }
-      if (result._tag === "Failure") return;
+      if (result._tag === "Failure") return null;
       storeNewTerminal(activeThreadRef, result.value.terminalId);
-      setTerminalOpen(true);
-      setTerminalFocusRequestId((value) => value + 1);
+      return result.value;
     },
     [
       activeThreadId,
@@ -2915,10 +2915,18 @@ function ChatViewContent(props: ChatViewProps) {
       allocatableActiveTerminalIds,
       environmentId,
       runCommandQuickAction,
-      setTerminalOpen,
       setThreadError,
       storeNewTerminal,
     ],
+  );
+  const handleOpenCommandQuickActionTerminal = useCallback(
+    (terminalId: string) => {
+      if (!activeThreadRef) return;
+      storeSetActiveTerminal(activeThreadRef, terminalId);
+      setTerminalOpen(true);
+      setTerminalFocusRequestId((value) => value + 1);
+    },
+    [activeThreadRef, setTerminalOpen, storeSetActiveTerminal],
   );
   const closeTerminal = useCallback(
     (terminalId: string) => {
@@ -6220,6 +6228,7 @@ function ChatViewContent(props: ChatViewProps) {
                 routeThreadKey={routeThreadKey}
                 onOpenTurnDiff={onOpenTurnDiff}
                 onRunCommandQuickAction={handleRunCommandQuickAction}
+                onOpenCommandQuickActionTerminal={handleOpenCommandQuickActionTerminal}
                 revertTurnCountByUserMessageId={revertTurnCountByUserMessageId}
                 onRevertUserMessage={onRevertUserMessage}
                 isRevertingCheckpoint={isRevertingCheckpoint}

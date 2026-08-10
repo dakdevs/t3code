@@ -2,12 +2,14 @@ import * as Haptics from "expo-haptics";
 import { KeyboardAwareLegendList } from "@legendapp/list/keyboard";
 import { type LegendListRef } from "@legendapp/list/react-native";
 import type {
+  CommandQuickActionRunResult,
   EnvironmentId,
   MessageId,
   OrchestrationQuickAction,
   ThreadId,
   TurnId,
 } from "@t3tools/contracts";
+import { formatInlineTerminalOutput } from "@t3tools/client-runtime/state/terminal";
 import { CHAT_LIST_ANCHOR_OFFSET, resolveChatListAnchoredEndSpace } from "@t3tools/shared/chatList";
 import { formatElapsed } from "@t3tools/shared/orchestrationTiming";
 import { SymbolView } from "../../components/AppSymbol";
@@ -87,6 +89,7 @@ import {
 import { MOBILE_TYPOGRAPHY } from "../../lib/typography";
 import { useAppearancePreferences } from "../settings/appearance/AppearancePreferencesProvider";
 import { useAppearanceCodeSurface } from "../settings/appearance/useAppearanceCodeSurface";
+import { useAttachedTerminalSession } from "../../state/use-terminal-session";
 import { markdownFileIconSource } from "@t3tools/mobile-markdown-text/file-icons";
 import { resolveMarkdownLinkPresentation } from "@t3tools/mobile-markdown-text/links";
 import {
@@ -156,7 +159,11 @@ export interface ThreadFeedProps {
   readonly layoutVariant?: LayoutVariant;
   readonly usesAutomaticContentInsets?: boolean;
   readonly onHeaderMaterialVisibilityChange?: (visible: boolean) => void;
-  readonly onRunCommandQuickAction: (messageId: MessageId, actionId: string) => Promise<void>;
+  readonly onRunCommandQuickAction: (
+    messageId: MessageId,
+    actionId: string,
+  ) => Promise<CommandQuickActionRunResult | null>;
+  readonly onOpenCommandQuickActionTerminal: (terminalId: string) => void;
   readonly skills?: ReadonlyArray<SelectableMarkdownSkill>;
   /** Non-null when older turns exist beyond the loaded window. */
   readonly loadEarlier?: {
@@ -820,7 +827,12 @@ function renderFeedEntry(
   info: { item: ThreadFeedEntry; index: number },
   props: Pick<
     ThreadFeedProps,
-    "commandQuickActionsEnabled" | "environmentId" | "onRunCommandQuickAction" | "skills"
+    | "commandQuickActionsEnabled"
+    | "environmentId"
+    | "threadId"
+    | "onRunCommandQuickAction"
+    | "onOpenCommandQuickActionTerminal"
+    | "skills"
   > & {
     readonly copiedRowId: string | null;
     readonly expandedWorkRows: Record<string, boolean>;
@@ -1009,8 +1021,11 @@ function renderFeedEntry(
         message.quickActions.length > 0 ? (
           <CommandQuickActions
             actions={message.quickActions}
+            environmentId={props.environmentId}
             messageId={message.id}
             onRun={props.onRunCommandQuickAction}
+            onOpenTerminal={props.onOpenCommandQuickActionTerminal}
+            threadId={props.threadId}
           />
         ) : null}
         {showAssistantMeta ? (
@@ -1045,37 +1060,137 @@ function renderFeedEntry(
 
 const CommandQuickActions = memo(function CommandQuickActions(props: {
   readonly actions: ReadonlyArray<OrchestrationQuickAction>;
+  readonly environmentId: EnvironmentId;
   readonly messageId: MessageId;
-  readonly onRun: (messageId: MessageId, actionId: string) => Promise<void>;
+  readonly onRun: (
+    messageId: MessageId,
+    actionId: string,
+  ) => Promise<CommandQuickActionRunResult | null>;
+  readonly onOpenTerminal: (terminalId: string) => void;
+  readonly threadId: ThreadId;
 }) {
-  const [runningActionId, setRunningActionId] = useState<string | null>(null);
+  return (
+    <View className="mt-3 gap-2">
+      {props.actions.map((action) => (
+        <InlineCommandQuickAction
+          key={action.id}
+          action={action}
+          environmentId={props.environmentId}
+          messageId={props.messageId}
+          onRun={props.onRun}
+          onOpenTerminal={props.onOpenTerminal}
+          threadId={props.threadId}
+        />
+      ))}
+    </View>
+  );
+});
+
+const InlineCommandQuickAction = memo(function InlineCommandQuickAction(props: {
+  readonly action: OrchestrationQuickAction;
+  readonly environmentId: EnvironmentId;
+  readonly messageId: MessageId;
+  readonly onRun: (
+    messageId: MessageId,
+    actionId: string,
+  ) => Promise<CommandQuickActionRunResult | null>;
+  readonly onOpenTerminal: (terminalId: string) => void;
+  readonly threadId: ThreadId;
+}) {
+  const [starting, setStarting] = useState(false);
+  const [execution, setExecution] = useState<CommandQuickActionRunResult | null>(null);
+  const outputScrollRef = useRef<ScrollView>(null);
   const iconColor = useThemeColor("--color-icon");
+  const terminal = useAttachedTerminalSession({
+    environmentId: execution === null ? null : props.environmentId,
+    terminal:
+      execution === null ? null : { threadId: props.threadId, terminalId: execution.terminalId },
+  });
+  const output =
+    execution === null ? "" : formatInlineTerminalOutput(terminal.buffer, execution.historyOffset);
+  const status =
+    terminal.error !== null || terminal.status === "error"
+      ? "error"
+      : terminal.hasRunningSubprocess || terminal.version === 0
+        ? "running"
+        : "finished";
+
+  useEffect(() => {
+    outputScrollRef.current?.scrollToEnd({ animated: false });
+  }, [output]);
+
+  if (execution === null) {
+    return (
+      <Pressable
+        accessibilityRole="button"
+        accessibilityLabel={props.action.label}
+        disabled={starting}
+        onPress={() => {
+          setStarting(true);
+          void props
+            .onRun(props.messageId, props.action.id)
+            .then((result) => {
+              if (result !== null) setExecution(result);
+            })
+            .finally(() => setStarting(false));
+        }}
+        className="min-h-10 self-start flex-row items-center gap-2 rounded-xl border border-border bg-card px-3 py-2 disabled:opacity-50"
+      >
+        {starting ? (
+          <ActivityIndicator size="small" />
+        ) : (
+          <SymbolView name="terminal" size={15} tintColor={iconColor} type="monochrome" />
+        )}
+        <Text className="font-t3-medium text-sm text-foreground">
+          {starting ? "Starting…" : props.action.label}
+        </Text>
+      </Pressable>
+    );
+  }
 
   return (
-    <View className="mt-3 flex-row flex-wrap gap-2">
-      {props.actions.map((action) => {
-        const running = runningActionId === action.id;
-        return (
-          <Pressable
-            key={action.id}
-            accessibilityRole="button"
-            accessibilityLabel={action.label}
-            disabled={runningActionId !== null}
-            onPress={() => {
-              setRunningActionId(action.id);
-              void props.onRun(props.messageId, action.id).finally(() => setRunningActionId(null));
-            }}
-            className="min-h-10 flex-row items-center gap-2 rounded-xl border border-border bg-card px-3 py-2 disabled:opacity-50"
-          >
-            {running ? (
-              <ActivityIndicator size="small" />
-            ) : (
-              <SymbolView name="terminal" size={15} tintColor={iconColor} type="monochrome" />
+    <View className="overflow-hidden rounded-xl border border-border bg-card">
+      <View className="min-h-10 flex-row items-center justify-between gap-3 border-b border-border px-3 py-2">
+        <View className="min-w-0 flex-1 flex-row items-center gap-2">
+          <View
+            className={cn(
+              "h-1.5 w-1.5 shrink-0 rounded-full",
+              status === "error"
+                ? "bg-red-500"
+                : status === "running"
+                  ? "bg-amber-500"
+                  : "bg-emerald-500",
             )}
-            <Text className="font-t3-medium text-sm text-foreground">{action.label}</Text>
-          </Pressable>
-        );
-      })}
+          />
+          <Text className="font-t3-medium text-xs text-foreground">
+            {status === "error" ? "Terminal error" : status === "running" ? "Running" : "Finished"}
+          </Text>
+          <Text
+            numberOfLines={1}
+            className="min-w-0 flex-1 font-mono text-xs text-foreground-secondary"
+          >
+            {props.action.command}
+          </Text>
+        </View>
+        <Pressable
+          accessibilityRole="button"
+          accessibilityLabel="Open terminal"
+          onPress={() => props.onOpenTerminal(execution.terminalId)}
+          className="flex-row items-center gap-1 rounded-lg px-1.5 py-1"
+        >
+          <SymbolView name="arrow.up.right" size={12} tintColor={iconColor} type="monochrome" />
+          <Text className="font-t3-medium text-xs text-foreground-secondary">Open</Text>
+        </Pressable>
+      </View>
+      <ScrollView ref={outputScrollRef} className="max-h-44" nestedScrollEnabled>
+        <NativeText
+          selectable
+          className="px-3 py-2 font-mono text-[11px] leading-relaxed text-foreground"
+        >
+          {terminal.error ??
+            (output || (status === "running" ? "Waiting for output…" : "No output."))}
+        </NativeText>
+      </ScrollView>
     </View>
   );
 });
@@ -1818,6 +1933,7 @@ export const ThreadFeed = memo(function ThreadFeed(props: ThreadFeedProps) {
     (info: { item: ThreadFeedEntry; index: number }) =>
       renderFeedEntry(info, {
         environmentId: props.environmentId,
+        threadId: props.threadId,
         commandQuickActionsEnabled: props.commandQuickActionsEnabled,
         copiedRowId,
         expandedWorkRows,
@@ -1837,6 +1953,7 @@ export const ThreadFeed = memo(function ThreadFeed(props: ThreadFeedProps) {
         userBubbleMaxWidth,
         skills: props.skills,
         onRunCommandQuickAction: props.onRunCommandQuickAction,
+        onOpenCommandQuickActionTerminal: props.onOpenCommandQuickActionTerminal,
       }),
     [
       copiedRowId,
@@ -1856,8 +1973,10 @@ export const ThreadFeed = memo(function ThreadFeed(props: ThreadFeedProps) {
       onToggleWorkGroup,
       onToggleWorkRow,
       props.environmentId,
+      props.threadId,
       props.commandQuickActionsEnabled,
       props.onRunCommandQuickAction,
+      props.onOpenCommandQuickActionTerminal,
       props.skills,
     ],
   );

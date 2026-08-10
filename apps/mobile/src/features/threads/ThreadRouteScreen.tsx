@@ -9,7 +9,13 @@ import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } fro
 import * as Cause from "effect/Cause";
 import * as Option from "effect/Option";
 import { AsyncResult } from "effect/unstable/reactivity";
-import { EnvironmentId, ThreadId, type MessageId, type ProjectScript } from "@t3tools/contracts";
+import {
+  EnvironmentId,
+  ThreadId,
+  type CommandQuickActionRunResult,
+  type MessageId,
+  type ProjectScript,
+} from "@t3tools/contracts";
 import {
   requestOlderThreadTurns,
   threadHasOlderTurns,
@@ -547,8 +553,8 @@ function ThreadRouteContent(
   }, [navigation, selectedThread, selectedThreadProject?.workspaceRoot, terminalMenuSessions]);
 
   const handleRunCommandQuickAction = useCallback(
-    async (messageId: MessageId, actionId: string) => {
-      if (!selectedThread || !selectedThreadProject?.workspaceRoot) return;
+    async (messageId: MessageId, actionId: string): Promise<CommandQuickActionRunResult | null> => {
+      if (!selectedThread || !selectedThreadProject?.workspaceRoot) return null;
       const terminalId = nextOpenTerminalId({
         listedTerminalIds: terminalMenuSessions.map((session) => session.terminalId),
       });
@@ -562,21 +568,27 @@ function ThreadRouteContent(
           "Command unavailable",
           error instanceof Error ? error.message : "Could not run this command.",
         );
-        return;
+        return null;
       }
-      void navigation.navigate("ThreadTerminal", {
-        environmentId: String(selectedThread.environmentId),
-        threadId: String(selectedThread.id),
-        terminalId: result.value.terminalId,
-      });
+      return result.value;
     },
     [
-      navigation,
       runCommandQuickAction,
       selectedThread,
       selectedThreadProject?.workspaceRoot,
       terminalMenuSessions,
     ],
+  );
+  const handleOpenCommandQuickActionTerminal = useCallback(
+    (terminalId: string) => {
+      if (!selectedThread) return;
+      void navigation.navigate("ThreadTerminal", {
+        environmentId: String(selectedThread.environmentId),
+        threadId: String(selectedThread.id),
+        terminalId,
+      });
+    },
+    [navigation, selectedThread],
   );
 
   const handleRunProjectScript = useCallback(
@@ -842,6 +854,7 @@ function ThreadRouteContent(
           onSendMessage={composer.onSendMessage}
           onReconnectEnvironment={handleReconnectEnvironment}
           onRunCommandQuickAction={handleRunCommandQuickAction}
+          onOpenCommandQuickActionTerminal={handleOpenCommandQuickActionTerminal}
           onUpdateThreadModelSelection={composer.onUpdateModelSelection}
           onUpdateThreadRuntimeMode={composer.onUpdateRuntimeMode}
           onUpdateThreadInteractionMode={composer.onUpdateInteractionMode}

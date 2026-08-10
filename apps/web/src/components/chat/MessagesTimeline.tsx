@@ -1,11 +1,14 @@
 import {
+  type CommandQuickActionRunResult,
   type EnvironmentId,
   type MessageId,
+  type OrchestrationQuickAction,
   type ScopedThreadRef,
   type ServerProviderSkill,
   type TurnId,
 } from "@t3tools/contracts";
 import { parseScopedThreadKey } from "@t3tools/client-runtime/environment";
+import { formatInlineTerminalOutput } from "@t3tools/client-runtime/state/terminal";
 import type { AgentPanelModel } from "@t3tools/client-runtime/state/subagentRuntime";
 import {
   emptyAgentPanelModel,
@@ -51,6 +54,7 @@ import {
   ChevronDownIcon,
   ChevronRightIcon,
   CircleAlertIcon,
+  ExternalLinkIcon,
   EyeIcon,
   GlobeIcon,
   HammerIcon,
@@ -66,6 +70,7 @@ import {
   ZapIcon,
 } from "lucide-react";
 import { Button } from "../ui/button";
+import { useAttachedTerminalSession } from "../../state/terminalSessions";
 import { buildExpandedImagePreview, ExpandedImagePreview } from "./ExpandedImagePreview";
 import { ProposedPlanCard } from "./ProposedPlanCard";
 import { ChangedFilesCard } from "./ChangedFilesTree";
@@ -141,7 +146,11 @@ interface TimelineRowSharedState {
   onRevertUserMessage: (messageId: MessageId) => void;
   onImageExpand: (preview: ExpandedImagePreview) => void;
   onOpenTurnDiff: (turnId: TurnId, filePath?: string) => void;
-  onRunCommandQuickAction: (messageId: MessageId, actionId: string) => Promise<void>;
+  onRunCommandQuickAction: (
+    messageId: MessageId,
+    actionId: string,
+  ) => Promise<CommandQuickActionRunResult | null>;
+  onOpenCommandQuickActionTerminal: (terminalId: string) => void;
   onToggleTurnFold: (turnId: TurnId) => void;
   onToggleWorkGroup: (groupId: string, anchorKey: string) => void;
   agentPanelModel: AgentPanelModel;
@@ -218,7 +227,11 @@ interface MessagesTimelineProps {
   turnDiffSummaryByAssistantMessageId: Map<MessageId, TurnDiffSummary>;
   routeThreadKey: string;
   onOpenTurnDiff: (turnId: TurnId, filePath?: string) => void;
-  onRunCommandQuickAction: (messageId: MessageId, actionId: string) => Promise<void>;
+  onRunCommandQuickAction: (
+    messageId: MessageId,
+    actionId: string,
+  ) => Promise<CommandQuickActionRunResult | null>;
+  onOpenCommandQuickActionTerminal: (terminalId: string) => void;
   revertTurnCountByUserMessageId: Map<MessageId, number>;
   onRevertUserMessage: (messageId: MessageId) => void;
   isRevertingCheckpoint: boolean;
@@ -267,6 +280,7 @@ export const MessagesTimeline = memo(function MessagesTimeline({
   routeThreadKey,
   onOpenTurnDiff,
   onRunCommandQuickAction,
+  onOpenCommandQuickActionTerminal,
   revertTurnCountByUserMessageId,
   onRevertUserMessage,
   isRevertingCheckpoint,
@@ -521,6 +535,7 @@ export const MessagesTimeline = memo(function MessagesTimeline({
       onImageExpand,
       onOpenTurnDiff,
       onRunCommandQuickAction,
+      onOpenCommandQuickActionTerminal,
       onToggleTurnFold,
       onToggleWorkGroup,
       agentPanelModel,
@@ -539,6 +554,7 @@ export const MessagesTimeline = memo(function MessagesTimeline({
       onImageExpand,
       onOpenTurnDiff,
       onRunCommandQuickAction,
+      onOpenCommandQuickActionTerminal,
       onToggleTurnFold,
       onToggleWorkGroup,
       agentPanelModel,
@@ -1120,18 +1136,6 @@ function TurnFoldTimelineRow({ row }: { row: Extract<TimelineRow, { kind: "turn-
 function AssistantTimelineRow({ row }: { row: Extract<TimelineRow, { kind: "message" }> }) {
   const ctx = use(TimelineRowCtx);
   const messageText = row.message.text || (row.message.streaming ? "" : "(empty response)");
-  const [runningActionId, setRunningActionId] = useState<string | null>(null);
-  const runQuickAction = useCallback(
-    async (actionId: string) => {
-      setRunningActionId(actionId);
-      try {
-        await ctx.onRunCommandQuickAction(row.message.id, actionId);
-      } finally {
-        setRunningActionId(null);
-      }
-    },
-    [ctx, row.message.id],
-  );
 
   return (
     <>
@@ -1154,18 +1158,11 @@ function AssistantTimelineRow({ row }: { row: Extract<TimelineRow, { kind: "mess
         (row.message.quickActions?.length ?? 0) > 0 ? (
           <div className="mt-2 flex flex-wrap gap-1.5" aria-label="Command quick actions">
             {row.message.quickActions?.map((action) => (
-              <Button
+              <InlineCommandQuickAction
                 key={action.id}
-                type="button"
-                size="xs"
-                variant="outline"
-                disabled={runningActionId !== null}
-                onClick={() => void runQuickAction(action.id)}
-                className="h-7 gap-1.5 px-2 text-xs"
-              >
-                <TerminalIcon className="size-3.5" />
-                {runningActionId === action.id ? "Running…" : action.label}
-              </Button>
+                action={action}
+                messageId={row.message.id}
+              />
             ))}
           </div>
         ) : null}
@@ -1188,6 +1185,110 @@ function AssistantTimelineRow({ row }: { row: Extract<TimelineRow, { kind: "mess
         ) : null}
       </div>
     </>
+  );
+}
+
+function InlineCommandQuickAction({
+  action,
+  messageId,
+}: {
+  action: OrchestrationQuickAction;
+  messageId: MessageId;
+}) {
+  const ctx = use(TimelineRowCtx);
+  const [starting, setStarting] = useState(false);
+  const [execution, setExecution] = useState<CommandQuickActionRunResult | null>(null);
+  const outputRef = useRef<HTMLPreElement>(null);
+  const terminal = useAttachedTerminalSession({
+    environmentId: execution === null ? null : ctx.activeThreadEnvironmentId,
+    terminal:
+      execution === null || ctx.threadRef === null
+        ? null
+        : {
+            threadId: ctx.threadRef.threadId,
+            terminalId: execution.terminalId,
+          },
+  });
+  const output =
+    execution === null ? "" : formatInlineTerminalOutput(terminal.buffer, execution.historyOffset);
+  const status =
+    terminal.error !== null || terminal.status === "error"
+      ? "error"
+      : terminal.hasRunningSubprocess || terminal.version === 0
+        ? "running"
+        : "finished";
+
+  useEffect(() => {
+    const element = outputRef.current;
+    if (element === null) return;
+    element.scrollTop = element.scrollHeight;
+  }, [output]);
+
+  const run = useCallback(async () => {
+    setStarting(true);
+    try {
+      const result = await ctx.onRunCommandQuickAction(messageId, action.id);
+      if (result !== null) setExecution(result);
+    } finally {
+      setStarting(false);
+    }
+  }, [action.id, ctx, messageId]);
+
+  if (execution === null) {
+    return (
+      <Button
+        type="button"
+        size="xs"
+        variant="outline"
+        disabled={starting}
+        onClick={() => void run()}
+        className="h-7 gap-1.5 px-2 text-xs"
+      >
+        <TerminalIcon className="size-3.5" />
+        {starting ? "Starting…" : action.label}
+      </Button>
+    );
+  }
+
+  return (
+    <div
+      className="w-full overflow-hidden rounded-lg border border-border/70 bg-muted/20 shadow-xs"
+      aria-live="polite"
+    >
+      <div className="flex min-h-9 items-center justify-between gap-3 border-b border-border/60 px-3 py-1.5">
+        <div className="flex min-w-0 items-center gap-2 text-xs">
+          <span
+            className={cn(
+              "size-1.5 shrink-0 rounded-full",
+              status === "error"
+                ? "bg-destructive"
+                : status === "running"
+                  ? "bg-amber-500"
+                  : "bg-emerald-500",
+            )}
+          />
+          <span className="font-medium text-foreground">
+            {status === "error" ? "Terminal error" : status === "running" ? "Running" : "Finished"}
+          </span>
+          <span className="truncate font-mono text-muted-foreground">{action.command}</span>
+        </div>
+        <button
+          type="button"
+          onClick={() => ctx.onOpenCommandQuickActionTerminal(execution.terminalId)}
+          className="flex shrink-0 items-center gap-1 rounded px-1.5 py-1 text-muted-foreground text-xs transition-colors hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/70"
+        >
+          <ExternalLinkIcon className="size-3" />
+          Open terminal
+        </button>
+      </div>
+      <pre
+        ref={outputRef}
+        className="max-h-44 overflow-auto whitespace-pre-wrap break-words px-3 py-2 font-mono text-[11px] text-foreground/85 leading-relaxed"
+      >
+        {terminal.error ??
+          (output || (status === "running" ? "Waiting for output…" : "No output."))}
+      </pre>
+    </div>
   );
 }
 

@@ -1,12 +1,10 @@
-import * as NodeServices from "@effect/platform-node/NodeServices";
 import { describe, expect, it } from "@effect/vitest";
 import * as Effect from "effect/Effect";
-import * as Path from "effect/Path";
 import * as Sink from "effect/Sink";
 import * as Stream from "effect/Stream";
 import { ChildProcessSpawner } from "effect/unstable/process";
 
-import { discoverGrokSkills, listGrokSkillCatalogRoots } from "./GrokSkills.ts";
+import { discoverGrokSkills } from "./GrokSkills.ts";
 
 const inspectPayload = (skills: ReadonlyArray<unknown>) => JSON.stringify({ skills });
 
@@ -29,26 +27,6 @@ const makeInspectSpawner = (stdout: string, exitCode = 0, spawnCwds?: Array<stri
       }),
     );
   });
-
-describe("listGrokSkillCatalogRoots", () => {
-  it.effect("includes grok home, plugins, shared agents, and workspace roots", () =>
-    Effect.gen(function* () {
-      const path = yield* Path.Path;
-      expect(
-        listGrokSkillCatalogRoots(path, "/workspaces/demo", {
-          GROK_HOME: "/opt/grok-data",
-          HOME: "/home/dev",
-        }),
-      ).toEqual([
-        path.join("/opt/grok-data", "skills"),
-        path.join("/opt/grok-data", "installed-plugins"),
-        path.join("/home/dev", ".agents", "skills"),
-        path.join("/workspaces/demo", ".grok", "skills"),
-        path.join("/workspaces/demo", ".agents", "skills"),
-      ]);
-    }).pipe(Effect.provide(NodeServices.layer)),
-  );
-});
 
 describe("discoverGrokSkills", () => {
   it.effect("maps inspect entries onto provider skills, sorted by name", () =>

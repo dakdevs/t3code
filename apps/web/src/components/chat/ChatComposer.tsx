@@ -48,7 +48,10 @@ import {
   pastedTextDisposition,
   wouldTextPasteExceedLimit,
 } from "@t3tools/client-runtime/text-paste";
-import { serializeComposerFileLink } from "@t3tools/shared/composerTrigger";
+import {
+  composerTriggerRefreshesSkillCatalog,
+  serializeComposerFileLink,
+} from "@t3tools/shared/composerTrigger";
 import { folderDropTarget, resolveDroppedFolderPath } from "./folderDrop";
 import { createModelSelection, normalizeModelSlug } from "@t3tools/shared/model";
 import { USAGE_LIMITS_COMMAND } from "@t3tools/shared/usageLimits";
@@ -2213,6 +2216,21 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
   // Derived: composer trigger / menu
   // ------------------------------------------------------------------
   const composerTriggerKind = composerTrigger?.kind ?? null;
+  const skillCatalogRefreshKeyRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (!composerTriggerRefreshesSkillCatalog(composerTriggerKind)) {
+      skillCatalogRefreshKeyRef.current = null;
+      return;
+    }
+    if (!gitCwd || !selectedProviderEntry) return;
+    const key = `${environmentId}:${selectedProviderEntry.instanceId}:${gitCwd}`;
+    if (skillCatalogRefreshKeyRef.current === key) return;
+    skillCatalogRefreshKeyRef.current = key;
+    void refreshProviders({
+      environmentId,
+      input: { instanceId: selectedProviderEntry.instanceId, cwd: gitCwd, force: true },
+    });
+  }, [composerTriggerKind, environmentId, gitCwd, refreshProviders, selectedProviderEntry]);
   const pathTriggerQuery = composerTrigger?.kind === "path" ? composerTrigger.query : "";
   const pullRequestTriggerQuery =
     composerTrigger?.kind === "pull-request" ? composerTrigger.query : "";

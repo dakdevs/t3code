@@ -13,6 +13,13 @@ export interface ComposerTrigger {
   rangeEnd: number;
 }
 
+/** `$` and `/` both list skills, so opening either menu re-probes the catalog. */
+export function composerTriggerRefreshesSkillCatalog(
+  kind: ComposerTriggerKind | null | undefined,
+): boolean {
+  return kind === "skill" || kind === "slash-command";
+}
+
 function composerFileLinkBasename(path: string): string {
   const separatorIndex = Math.max(path.lastIndexOf("/"), path.lastIndexOf("\\"));
   return separatorIndex >= 0 ? path.slice(separatorIndex + 1) : path;

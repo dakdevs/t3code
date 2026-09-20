@@ -68,7 +68,6 @@ import {
 } from "../providerUpdateSettings.ts";
 import {
   codexContinuationIdentity,
-  listCodexSkillCatalogRoots,
   materializeCodexShadowHome,
   resolveCodexHomeLayout,
 } from "./CodexHomeLayout.ts";
@@ -347,10 +346,6 @@ export const CodexDriver: ProviderDriver<CodexSettings, CodexDriverEnv> = {
         enabled,
         snapshot,
         snapshotForCwd,
-        skillCatalogRoots: (cwd) =>
-          Effect.succeed(
-            listCodexSkillCatalogRoots(pathService, homeLayout.sharedHomePath, cwd, processEnv),
-          ),
         consumeResetCredit,
         adapter,
         textGeneration,

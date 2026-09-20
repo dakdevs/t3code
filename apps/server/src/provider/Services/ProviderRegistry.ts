@@ -52,9 +52,8 @@ export interface ProviderRegistryShape {
     readonly instanceId: ProviderInstanceId;
     readonly cwd: string;
     /**
-     * Re-probe even when a snapshot for `cwd` already exists. Used by the
-     * skill-catalog poller after a directory fingerprint changes. The
-     * composer RPC omits this so the first snapshot stays a one-shot.
+     * Re-probe even when a snapshot for `cwd` already exists. The composer
+     * sends this when the skill or slash menu opens.
      */
     readonly force?: boolean;
   }) => Effect.Effect<ReadonlyArray<ServerProvider>>;

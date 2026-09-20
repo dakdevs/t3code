@@ -16,6 +16,7 @@ import {
 } from "../../state/use-composer-drafts";
 import { USAGE_LIMITS_COMMAND } from "@t3tools/shared/usageLimits";
 import {
+  composerTriggerRefreshesSkillCatalog,
   detectComposerTrigger,
   replaceTextRange,
   serializeComposerFileLink,
@@ -296,6 +297,21 @@ export function useComposerCommandMenu({
     }
     return detectComposerTrigger(draftMessage, selection.end);
   }, [draftMessage, enabled, selection]);
+  const skillCatalogRefreshKeyRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (!composerTriggerRefreshesSkillCatalog(trigger?.kind)) {
+      skillCatalogRefreshKeyRef.current = null;
+      return;
+    }
+    if (!environmentId || !projectCwd || !selectedProviderInstanceId) return;
+    const key = `${environmentId}:${selectedProviderInstanceId}:${projectCwd}`;
+    if (skillCatalogRefreshKeyRef.current === key) return;
+    skillCatalogRefreshKeyRef.current = key;
+    void refreshProviders({
+      environmentId,
+      input: { instanceId: selectedProviderInstanceId, cwd: projectCwd, force: true },
+    });
+  }, [environmentId, projectCwd, refreshProviders, selectedProviderInstanceId, trigger?.kind]);
   const pathSearch = useComposerPathSearch({
     environmentId,
     cwd: trigger?.kind === "path" ? projectCwd : null,

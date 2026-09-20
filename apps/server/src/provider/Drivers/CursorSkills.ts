@@ -231,14 +231,6 @@ function cursorSkillRootSpecs(
   return [...(cwd ? rootsBelow(cwd, "project") : []), ...rootsBelow(userHome, "user")];
 }
 
-export function listCursorSkillCatalogRoots(
-  path: Path.Path,
-  cwd: string,
-  environment: NodeJS.ProcessEnv = process.env,
-): ReadonlyArray<string> {
-  return cursorSkillRootSpecs(path, cwd, environment).map((root) => root.directory);
-}
-
 const inspectCursorSkills = Effect.fn("inspectCursorSkills")(function* (
   cwd?: string,
   environment: NodeJS.ProcessEnv = process.env,

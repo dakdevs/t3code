@@ -28,7 +28,7 @@ import {
 } from "../ProviderDriver.ts";
 import { withInstanceIdentity } from "./instanceIdentity.ts";
 import { mergeProviderInstanceEnvironment } from "../ProviderInstanceEnvironment.ts";
-import { discoverGrokSkills, listGrokSkillCatalogRoots } from "./GrokSkills.ts";
+import { discoverGrokSkills } from "./GrokSkills.ts";
 import { makeManualOnlyProviderMaintenanceCapabilities } from "../providerMaintenance.ts";
 import {
   haveProviderSnapshotSettingsChanged,
@@ -164,8 +164,6 @@ export const GrokDriver: ProviderDriver<GrokSettings, GrokDriverEnv> = {
         enabled,
         snapshot,
         snapshotForCwd,
-        skillCatalogRoots: (workspaceCwd) =>
-          Effect.succeed(listGrokSkillCatalogRoots(path, workspaceCwd, processEnv)),
         adapter,
         textGeneration,
       } satisfies ProviderInstance;

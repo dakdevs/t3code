@@ -73,13 +73,6 @@ export interface ProviderInstance {
   readonly enabled: boolean;
   readonly snapshot: ServerProviderShape;
   readonly snapshotForCwd?: (cwd: string) => Effect.Effect<ServerProvider, ProviderDriverError>;
-  /**
-   * Directories (and occasional files) whose listing/mtime is a cheap stand-in
-   * for "this instance's skill catalog may have changed". The registry
-   * fingerprints these on a timer and re-runs `snapshotForCwd` only on a
-   * mismatch, so the `$` picker picks up new skills without a restart.
-   */
-  readonly skillCatalogRoots?: (cwd: string) => Effect.Effect<ReadonlyArray<string>>;
   readonly refreshModels?: () => Effect.Effect<void, ProviderDriverError>;
   /**
    * Redeem one banked rate-limit reset credit on the signed-in account, then

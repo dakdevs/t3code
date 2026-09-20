@@ -60,7 +60,7 @@ import {
   type ProviderSnapshotSettings,
 } from "../providerUpdateSettings.ts";
 import { makeClaudeCapabilitiesCacheKey, makeClaudeContinuationGroupKey } from "./ClaudeHome.ts";
-import { discoverClaudeSkills, listClaudeSkillCatalogRoots } from "./ClaudeSkills.ts";
+import { discoverClaudeSkills } from "./ClaudeSkills.ts";
 const decodeClaudeSettings = Schema.decodeSync(ClaudeSettings);
 
 const DRIVER_KIND = ProviderDriverKind.make("claudeAgent");
@@ -262,10 +262,6 @@ export const ClaudeDriver: ProviderDriver<ClaudeSettings, ClaudeDriverEnv> = {
         enabled,
         snapshot,
         snapshotForCwd,
-        skillCatalogRoots: (workspaceCwd) =>
-          listClaudeSkillCatalogRoots(effectiveConfig, workspaceCwd, processEnv).pipe(
-            Effect.provideService(Path.Path, path),
-          ),
         adapter,
         textGeneration,
       } satisfies ProviderInstance;

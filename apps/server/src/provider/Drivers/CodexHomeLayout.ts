@@ -33,22 +33,6 @@ const PRIVATE_ENTRY_NAMES = new Set(["auth.json", "models_cache.json"]);
 const SHADOW_LOCAL_ENTRY_NAMES = new Set(["log", "memories", "tmp"]);
 const REPLACEABLE_SHARED_RUNTIME_DIRECTORIES = new Set(["mcp-oauth-locks"]);
 
-export function listCodexSkillCatalogRoots(
-  path: Path.Path,
-  sharedHomePath: string,
-  cwd: string,
-  environment: NodeJS.ProcessEnv = process.env,
-): ReadonlyArray<string> {
-  const userHome = environment.HOME?.trim() || environment.USERPROFILE?.trim() || NodeOS.homedir();
-  return [
-    path.join(sharedHomePath, "skills"),
-    path.join(sharedHomePath, "plugins"),
-    path.join(userHome, ".agents", "skills"),
-    path.join(cwd, ".codex", "skills"),
-    path.join(cwd, ".agents", "skills"),
-  ];
-}
-
 function resolveHomePath(path: Path.Path, value: string | undefined): string {
   const expanded =
     value && value.trim().length > 0

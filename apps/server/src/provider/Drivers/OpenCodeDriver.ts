@@ -12,6 +12,8 @@
  *
  * @module provider/Drivers/OpenCodeDriver
  */
+import * as NodeOS from "node:os";
+
 import { OpenCodeSettings, ProviderDriverKind } from "@t3tools/contracts";
 import * as Crypto from "effect/Crypto";
 import * as Effect from "effect/Effect";
@@ -60,6 +62,22 @@ import {
 const decodeOpenCodeSettings = Schema.decodeSync(OpenCodeSettings);
 
 const DRIVER_KIND = ProviderDriverKind.make("opencode");
+
+export function listOpenCodeSkillCatalogRoots(
+  path: Path.Path,
+  cwd: string,
+  environment: NodeJS.ProcessEnv = process.env,
+): ReadonlyArray<string> {
+  const userHome = environment.HOME?.trim() || environment.USERPROFILE?.trim() || NodeOS.homedir();
+  const configHome = environment.XDG_CONFIG_HOME?.trim() || path.join(userHome, ".config");
+  return [
+    path.join(cwd, ".opencode", "skills"),
+    path.join(cwd, ".agents", "skills"),
+    path.join(configHome, "opencode", "skills"),
+    path.join(userHome, ".opencode", "skills"),
+    path.join(userHome, ".agents", "skills"),
+  ];
+}
 
 function isOpenCodeNativeCommandPath(commandPath: string): boolean {
   const normalized = normalizeCommandPath(commandPath);
@@ -287,6 +305,8 @@ export const OpenCodeDriver: ProviderDriver<OpenCodeSettings, OpenCodeDriverEnv>
                     }),
                 ),
               ),
+        skillCatalogRoots: (cwd) =>
+          Effect.succeed(listOpenCodeSkillCatalogRoots(pathService, cwd, processEnv)),
         adapter,
         textGeneration,
       } satisfies ProviderInstance;

@@ -296,6 +296,21 @@ const resolveClaudeConfigDirPath = Effect.fn("resolveClaudeConfigDirPath")(funct
 });
 
 /**
+ * User and project skill directories Claude Code actually loads. Fingerprinted
+ * by the registry so a new folder under either root refreshes the `$` picker
+ * without a full provider probe.
+ */
+export const listClaudeSkillCatalogRoots = Effect.fn("listClaudeSkillCatalogRoots")(function* (
+  config: Pick<ClaudeSettings, "homePath">,
+  cwd: string,
+  environment: NodeJS.ProcessEnv = process.env,
+): Effect.fn.Return<ReadonlyArray<string>, never, Path.Path> {
+  const path = yield* Path.Path;
+  const configDirPath = yield* resolveClaudeConfigDirPath(config, environment, cwd);
+  return [path.join(configDirPath, "skills"), path.join(cwd, ".claude", "skills")];
+});
+
+/**
  * Enumerate Claude Code skills from the user config dir and the workspace
  * `.claude/skills`. Discovery is best-effort: unreadable roots and malformed
  * skill entries are skipped so a broken skill never degrades the provider

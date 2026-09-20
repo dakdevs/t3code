@@ -216,11 +216,11 @@ const discoverSkillsInRoot = Effect.fn("discoverCursorSkillsInRoot")(function* (
   return skills;
 });
 
-const inspectCursorSkills = Effect.fn("inspectCursorSkills")(function* (
-  cwd?: string,
-  environment: NodeJS.ProcessEnv = process.env,
-) {
-  const path = yield* Path.Path;
+function cursorSkillRootSpecs(
+  path: Path.Path,
+  cwd: string | undefined,
+  environment: NodeJS.ProcessEnv,
+): ReadonlyArray<{ readonly directory: string; readonly scope: "user" | "project" }> {
   const userHome = environment.HOME?.trim() || environment.USERPROFILE?.trim() || NodeOS.homedir();
   const rootsBelow = (base: string, scope: "user" | "project") => [
     { directory: path.join(base, ".cursor", "skills"), scope },
@@ -228,7 +228,23 @@ const inspectCursorSkills = Effect.fn("inspectCursorSkills")(function* (
     { directory: path.join(base, ".codex", "skills"), scope },
     { directory: path.join(base, ".claude", "skills"), scope },
   ];
-  const roots = [...(cwd ? rootsBelow(cwd, "project") : []), ...rootsBelow(userHome, "user")];
+  return [...(cwd ? rootsBelow(cwd, "project") : []), ...rootsBelow(userHome, "user")];
+}
+
+export function listCursorSkillCatalogRoots(
+  path: Path.Path,
+  cwd: string,
+  environment: NodeJS.ProcessEnv = process.env,
+): ReadonlyArray<string> {
+  return cursorSkillRootSpecs(path, cwd, environment).map((root) => root.directory);
+}
+
+const inspectCursorSkills = Effect.fn("inspectCursorSkills")(function* (
+  cwd?: string,
+  environment: NodeJS.ProcessEnv = process.env,
+) {
+  const path = yield* Path.Path;
+  const roots = cursorSkillRootSpecs(path, cwd, environment);
 
   const skillsByName = new Map<string, ServerProviderSkill>();
   const budget: CursorSkillScanBudget = {

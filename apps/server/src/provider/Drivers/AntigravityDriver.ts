@@ -59,7 +59,11 @@ import {
 } from "../ProviderDriver.ts";
 import { mergeProviderInstanceEnvironment } from "../ProviderInstanceEnvironment.ts";
 import { withInstanceIdentity } from "./instanceIdentity.ts";
-import { discoverAntigravitySkills, resolveAntigravityUserHome } from "./AntigravitySkills.ts";
+import {
+  discoverAntigravitySkills,
+  listAntigravitySkillCatalogRoots,
+  resolveAntigravityUserHome,
+} from "./AntigravitySkills.ts";
 
 const DRIVER = ProviderDriverKind.make("antigravity");
 const decodeSettings = Schema.decodeSync(AntigravitySettings);
@@ -471,6 +475,14 @@ export const AntigravityDriver: ProviderDriver<AntigravitySettings, AntigravityD
                     }),
                 ),
               ),
+        skillCatalogRoots: (cwd) =>
+          Effect.succeed(
+            listAntigravitySkillCatalogRoots({
+              path,
+              cwd,
+              userHome,
+            }),
+          ),
         adapter,
         textGeneration,
         auth: authFlow.controller,

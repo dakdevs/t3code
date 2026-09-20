@@ -51,11 +51,6 @@ export interface ProviderRegistryShape {
   readonly refreshWorkspaceSnapshot: (input: {
     readonly instanceId: ProviderInstanceId;
     readonly cwd: string;
-    /**
-     * Re-probe even when a snapshot for `cwd` already exists. The composer
-     * sends this when the skill or slash menu opens.
-     */
-    readonly force?: boolean;
   }) => Effect.Effect<ReadonlyArray<ServerProvider>>;
 
   /**

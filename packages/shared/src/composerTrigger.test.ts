@@ -1,10 +1,6 @@
 import { describe, expect, it } from "vite-plus/test";
 
-import {
-  composerTriggerRefreshesSkillCatalog,
-  detectComposerTrigger,
-  serializeComposerFileLink,
-} from "./composerTrigger.ts";
+import { detectComposerTrigger, serializeComposerFileLink } from "./composerTrigger.ts";
 
 describe("detectComposerTrigger", () => {
   it.each(["$", "€", "£", "¥", "₹", "₩", "₿", "𑿝"])(
@@ -19,20 +15,6 @@ describe("detectComposerTrigger", () => {
       });
     },
   );
-});
-
-describe("composerTriggerRefreshesSkillCatalog", () => {
-  it("re-probes when the skill or slash menu is open", () => {
-    expect(composerTriggerRefreshesSkillCatalog("skill")).toBe(true);
-    expect(composerTriggerRefreshesSkillCatalog("slash-command")).toBe(true);
-  });
-
-  it("leaves other composer triggers on the cached catalog", () => {
-    expect(composerTriggerRefreshesSkillCatalog("path")).toBe(false);
-    expect(composerTriggerRefreshesSkillCatalog("pull-request")).toBe(false);
-    expect(composerTriggerRefreshesSkillCatalog("slash-model")).toBe(false);
-    expect(composerTriggerRefreshesSkillCatalog(null)).toBe(false);
-  });
 });
 
 describe("serializeComposerFileLink", () => {

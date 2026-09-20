@@ -48,6 +48,24 @@ export function antigravityUserSkillDirectories(
   ];
 }
 
+export function listAntigravitySkillCatalogRoots(input: {
+  readonly path: Path.Path;
+  readonly cwd: string;
+  readonly userHome: string;
+}): ReadonlyArray<string> {
+  const [configSkills, cliSkills] = antigravityUserSkillDirectories(
+    input.path,
+    input.path.join(input.userHome, ".gemini"),
+  );
+  return [
+    configSkills,
+    input.path.resolve(input.cwd, ".gemini", "skills"),
+    cliSkills,
+    input.path.resolve(input.cwd, ".agents", "skills"),
+    input.path.resolve(input.cwd, ".agent", "skills"),
+  ];
+}
+
 const MAX_SKILL_BYTES = 1_000_000;
 const MAX_SCAN_BYTES = 8_000_000;
 const MAX_SCAN_ENTRIES = 10_000;

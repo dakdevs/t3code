@@ -476,11 +476,6 @@ const WsServerRefreshProvidersRpc = Rpc.make(WS_METHODS.serverRefreshProviders, 
      */
     instanceId: Schema.optional(ProviderInstanceId),
     cwd: Schema.optional(TrimmedNonEmptyString),
-    /**
-     * Re-probe a cwd that already has a workspace snapshot. The composer
-     * sends this when the skill or slash menu opens.
-     */
-    force: Schema.optional(Schema.Boolean),
     /** Explicit user request. Background status refreshes must not open agent sessions. */
     refreshModels: Schema.optional(Schema.Boolean),
   }),

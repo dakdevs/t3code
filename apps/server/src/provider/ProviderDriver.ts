@@ -73,6 +73,14 @@ export interface ProviderInstance {
   readonly enabled: boolean;
   readonly snapshot: ServerProviderShape;
   readonly snapshotForCwd?: (cwd: string) => Effect.Effect<ServerProvider, ProviderDriverError>;
+  /**
+   * Files and directories whose changes invalidate `snapshotForCwd`.
+   * Drivers own these paths so instance-specific configuration and environment
+   * stay identical to discovery.
+   */
+  readonly skillCatalogWatchPaths?: (
+    cwd: string,
+  ) => Effect.Effect<ReadonlyArray<{ readonly path: string; readonly recursive: boolean }>, never>;
   readonly refreshModels?: () => Effect.Effect<void, ProviderDriverError>;
   /**
    * Redeem one banked rate-limit reset credit on the signed-in account, then

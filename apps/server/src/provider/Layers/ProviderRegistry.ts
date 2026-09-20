@@ -25,7 +25,7 @@
 import {
   defaultInstanceIdForDriver,
   ProviderDriverKind,
-  type ProviderInstanceId,
+  ProviderInstanceId,
   type ServerProvider,
   type ServerProviderUpdateState,
 } from "@t3tools/contracts";
@@ -37,6 +37,7 @@ import * as Layer from "effect/Layer";
 import * as Path from "effect/Path";
 import * as PubSub from "effect/PubSub";
 import * as Ref from "effect/Ref";
+import * as Schedule from "effect/Schedule";
 import * as Stream from "effect/Stream";
 import * as Semaphore from "effect/Semaphore";
 
@@ -54,6 +55,13 @@ import {
 import type { ProviderInstance } from "../ProviderDriver.ts";
 import { makeManualOnlyProviderMaintenanceCapabilities } from "../providerMaintenance.ts";
 import type { ProviderSnapshotSource } from "../builtInProviderCatalog.ts";
+import {
+  fingerprintSkillCatalogRoots,
+  isSkillCatalogTargetForInstance,
+  refreshChangedSkillCatalogs,
+  skillCatalogTargetKey,
+  SKILL_CATALOG_REFRESH_INTERVAL,
+} from "../skillCatalogFingerprint.ts";
 
 const loadProviders = (
   providerSources: ReadonlyArray<ProviderSnapshotSource>,
@@ -360,6 +368,7 @@ export const ProviderRegistryLive = Layer.effect(
     const workspaceRefreshesRef = yield* Ref.make<
       ReadonlyMap<ProviderInstance, ReadonlySet<string>>
     >(new Map());
+    const skillFingerprintsRef = yield* Ref.make<ReadonlyMap<string, string>>(new Map());
     const maintenanceActionStatesRef = yield* Ref.make<
       ReadonlyMap<ProviderInstanceId, { readonly update?: ServerProviderUpdateState | undefined }>
     >(new Map());
@@ -646,6 +655,17 @@ export const ProviderRegistryLive = Layer.effect(
             .filter((instanceId) => previousSubs.has(instanceId)),
         );
         if (rebuiltInstanceIds.size > 0) {
+          yield* Ref.update(skillFingerprintsRef, (fingerprints) => {
+            const next = new Map(fingerprints);
+            for (const instanceId of rebuiltInstanceIds) {
+              for (const key of next.keys()) {
+                if (isSkillCatalogTargetForInstance(key, instanceId)) {
+                  next.delete(key);
+                }
+              }
+            }
+            return next;
+          });
           const [previousProviders, providers] = yield* Ref.modify(
             providersRef,
             (previousProviders) => {
@@ -722,6 +742,19 @@ export const ProviderRegistryLive = Layer.effect(
           for (const instanceId of previous.keys()) {
             if (!knownInstanceIds.has(instanceId)) {
               next.delete(instanceId);
+            }
+          }
+          return next;
+        });
+        yield* Ref.update(skillFingerprintsRef, (fingerprints) => {
+          const next = new Map(fingerprints);
+          for (const key of fingerprints.keys()) {
+            const instanceId = key.split("\0")[0];
+            if (
+              instanceId === undefined ||
+              !knownInstanceIds.has(ProviderInstanceId.make(instanceId))
+            ) {
+              next.delete(key);
             }
           }
           return next;
@@ -803,17 +836,32 @@ export const ProviderRegistryLive = Layer.effect(
       return yield* Ref.get(providersRef);
     });
 
+    const rememberSkillCatalogFingerprint = Effect.fn("rememberSkillCatalogFingerprint")(function* (
+      instance: ProviderInstance,
+      cwd: string,
+    ) {
+      if (!instance.skillCatalogRoots) return;
+      const roots = yield* instance.skillCatalogRoots(cwd);
+      const fingerprint = yield* fingerprintSkillCatalogRoots(roots).pipe(
+        Effect.provideService(FileSystem.FileSystem, fileSystem),
+        Effect.provideService(Path.Path, path),
+      );
+      yield* Ref.update(skillFingerprintsRef, (fingerprints) =>
+        new Map(fingerprints).set(skillCatalogTargetKey(instance.instanceId, cwd), fingerprint),
+      );
+    });
+
     const refreshWorkspaceSnapshot = Effect.fn("refreshWorkspaceSnapshot")(function* (input: {
       readonly instanceId: ProviderInstanceId;
       readonly cwd: string;
+      readonly force?: boolean;
     }) {
       const providers = yield* Ref.get(providersRef);
       const provider = providers.find((candidate) => candidate.instanceId === input.instanceId);
-      if (
-        !provider ||
-        !provider.enabled ||
-        provider.workspaceSnapshots?.some((s) => s.cwd === input.cwd)
-      ) {
+      const hasWorkspaceSnapshot = Boolean(
+        provider?.workspaceSnapshots?.some((snapshot) => snapshot.cwd === input.cwd),
+      );
+      if (!provider || !provider.enabled || (hasWorkspaceSnapshot && !input.force)) {
         return providers;
       }
       const instance = yield* instanceRegistry.getInstance(input.instanceId);
@@ -836,7 +884,10 @@ export const ProviderRegistryLive = Layer.effect(
                   return Ref.modify(providersRef, (currentProviders) => {
                     const nextProviders = currentProviders.map((candidate) =>
                       candidate.instanceId === input.instanceId &&
-                      !candidate.workspaceSnapshots?.some((s) => s.cwd === input.cwd)
+                      (input.force ||
+                        !candidate.workspaceSnapshots?.some(
+                          (snapshot) => snapshot.cwd === input.cwd,
+                        ))
                         ? upsertProviderWorkspaceSnapshot(candidate, input.cwd, scopedSnapshot)
                         : candidate,
                     );
@@ -847,6 +898,7 @@ export const ProviderRegistryLive = Layer.effect(
                         ? PubSub.publish(changesPubSub, nextProviders)
                         : Effect.void,
                     ),
+                    Effect.tap(() => rememberSkillCatalogFingerprint(instance, input.cwd)),
                     Effect.map(([, nextProviders]) => nextProviders),
                   );
                 }),
@@ -864,6 +916,63 @@ export const ProviderRegistryLive = Layer.effect(
         ),
       );
     });
+
+    const refreshStaleSkillCatalogs = Effect.fn("refreshStaleSkillCatalogs")(function* () {
+      const providers = yield* Ref.get(providersRef);
+      const instances = yield* instanceRegistry.listInstances;
+      const instanceById = new Map(
+        instances.map((instance) => [instance.instanceId, instance] as const),
+      );
+      const targets = yield* Effect.forEach(
+        providers.flatMap((provider) => {
+          const instance = instanceById.get(provider.instanceId);
+          const listRoots = instance?.skillCatalogRoots;
+          if (
+            !provider.enabled ||
+            !instance?.snapshotForCwd ||
+            !listRoots ||
+            !provider.workspaceSnapshots?.length
+          ) {
+            return [];
+          }
+          return provider.workspaceSnapshots.map((snapshot) => ({
+            instance,
+            listRoots,
+            cwd: snapshot.cwd,
+          }));
+        }),
+        ({ instance, listRoots, cwd }) =>
+          listRoots(cwd).pipe(
+            Effect.map((roots) => ({
+              key: skillCatalogTargetKey(instance.instanceId, cwd),
+              roots,
+              refresh: refreshWorkspaceSnapshot({
+                instanceId: instance.instanceId,
+                cwd,
+                force: true,
+              }).pipe(Effect.catchCause(recoverRefreshFailure), Effect.asVoid),
+            })),
+          ),
+        { concurrency: "unbounded" },
+      );
+      yield* refreshChangedSkillCatalogs({
+        targets: targets.filter((target) => target.roots.length > 0),
+        fingerprints: skillFingerprintsRef,
+      }).pipe(
+        Effect.provideService(FileSystem.FileSystem, fileSystem),
+        Effect.provideService(Path.Path, path),
+      );
+    });
+
+    yield* Effect.sleep(SKILL_CATALOG_REFRESH_INTERVAL).pipe(
+      Effect.andThen(
+        refreshStaleSkillCatalogs().pipe(
+          Effect.repeat(Schedule.spaced(SKILL_CATALOG_REFRESH_INTERVAL)),
+        ),
+      ),
+      Effect.ignoreCause({ log: true }),
+      Effect.forkScoped,
+    );
 
     return {
       getProviders: Ref.get(providersRef),

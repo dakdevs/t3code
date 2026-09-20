@@ -15,9 +15,12 @@
  *
  * @module provider/Drivers/GrokSkills
  */
+import * as NodeOS from "node:os";
+
 import type { GrokSettings, ServerProviderSkill } from "@t3tools/contracts";
 import * as Effect from "effect/Effect";
 import * as Option from "effect/Option";
+import type * as Path from "effect/Path";
 import * as Schema from "effect/Schema";
 import { ChildProcess } from "effect/unstable/process";
 import { resolveSpawnCommand } from "@t3tools/shared/shell";
@@ -25,6 +28,27 @@ import { resolveSpawnCommand } from "@t3tools/shared/shell";
 import { spawnAndCollect } from "../providerSnapshot.ts";
 
 const GROK_SKILLS_PROBE_TIMEOUT_MS = 4_000;
+
+/**
+ * Directories `grok inspect` can surface skills from. Plugin skills live
+ * under `installed-plugins`, which a flat `skills/` scan would miss, so that
+ * tree is fingerprinted too.
+ */
+export function listGrokSkillCatalogRoots(
+  path: Path.Path,
+  cwd: string,
+  environment: NodeJS.ProcessEnv = process.env,
+): ReadonlyArray<string> {
+  const grokHome = environment.GROK_HOME?.trim() || path.join(NodeOS.homedir(), ".grok");
+  const userHome = environment.HOME?.trim() || environment.USERPROFILE?.trim() || NodeOS.homedir();
+  return [
+    path.join(grokHome, "skills"),
+    path.join(grokHome, "installed-plugins"),
+    path.join(userHome, ".agents", "skills"),
+    path.join(cwd, ".grok", "skills"),
+    path.join(cwd, ".agents", "skills"),
+  ];
+}
 
 class GrokSkillsProbeError extends Schema.TaggedError<GrokSkillsProbeError>()(
   "GrokSkillsProbeError",

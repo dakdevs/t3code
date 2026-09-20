@@ -5,7 +5,11 @@ import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
 import * as Path from "effect/Path";
 
-import { discoverClaudeSkills, skillOverrideSettingsPaths } from "./ClaudeSkills.ts";
+import {
+  discoverClaudeSkills,
+  listClaudeSkillCatalogRoots,
+  skillOverrideSettingsPaths,
+} from "./ClaudeSkills.ts";
 
 const writeSkill = Effect.fn(function* (
   skillsDir: string,
@@ -218,6 +222,20 @@ it.layer(NodeServices.layer)("discoverClaudeSkills", (it) => {
         explicitSkills.map((skill) => skill.name),
         ["explicit-skill"],
       );
+    }),
+  );
+
+  it.effect("lists the user and project skill directories Claude actually loads", () =>
+    Effect.gen(function* () {
+      const fs = yield* FileSystem.FileSystem;
+      const path = yield* Path.Path;
+      const tempDir = yield* fs.makeTempDirectoryScoped({ prefix: "t3-claude-skill-roots-" });
+      const configDir = path.join(tempDir, "claude-home");
+      const workspace = path.join(tempDir, "workspace");
+      assert.deepEqual(yield* listClaudeSkillCatalogRoots({ homePath: configDir }, workspace), [
+        path.join(configDir, "skills"),
+        path.join(workspace, ".claude", "skills"),
+      ]);
     }),
   );
 

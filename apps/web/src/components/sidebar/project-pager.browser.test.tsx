@@ -2,7 +2,7 @@ import type { EnvironmentThreadSearchMatch } from "@t3tools/client-runtime/state
 import { EnvironmentId, ProjectId, ProviderInstanceId, ThreadId } from "@t3tools/contracts";
 import { useState, type ReactNode } from "react";
 import { describe, expect, it, vi } from "vite-plus/test";
-import { commands } from "vite-plus/test/browser";
+import { commands, page, userEvent } from "vite-plus/test/browser";
 
 import "~/index.css";
 
@@ -12,6 +12,7 @@ import {
   type SidebarProjectSnapshot,
 } from "../../sidebarProjectGrouping";
 import { SidebarContent } from "../ui/sidebar";
+import { Tooltip, TooltipDismissScope, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import { ProjectPager, projectPagerNeighbours, stepSidebarWheel } from "./project-pager";
 import { useScopedThreadSearch } from "./use-scoped-thread-search";
 
@@ -341,6 +342,136 @@ describe("sideways wheel over the sidebar", () => {
     expect(pager.scrollLeft).toBe(400);
     await expect.element(screen.getByTestId("live-list")).toHaveTextContent("gamma");
     expect(pager.scrollLeft).toBe(200);
+  });
+});
+
+function Tip({ testId, label, delay = 0 }: { testId: string; label: string; delay?: number }) {
+  return (
+    <Tooltip>
+      <TooltipTrigger data-testid={testId} delay={delay}>
+        {testId}
+      </TooltipTrigger>
+      <TooltipPopup>{label}</TooltipPopup>
+    </Tooltip>
+  );
+}
+
+const tipThreadsPage = (key: string | null, current: boolean) => (
+  <>
+    {current ? <Tip testId="row-tip" label="Thread details" /> : null}
+    {threadsPage(key, current)}
+  </>
+);
+
+// Tooltips in the header, in the current page and in the footer, outside the
+// pager on both sides, like the real sidebar's chrome around its lists.
+function TooltipSidebarHarness({
+  initialKey,
+  headerDelay = 0,
+}: {
+  initialKey: string | null;
+  headerDelay?: number;
+}) {
+  const [scopeKey, setScopeKey] = useState(initialKey);
+  return (
+    <TooltipDismissScope>
+      <div
+        data-sidebar="sidebar"
+        style={{ display: "flex", flexDirection: "column", width: 200, height: 240 }}
+      >
+        <SidebarContent
+          fixedHeader={
+            <div data-testid="search" style={{ height: 32 }}>
+              <Tip testId="header-tip" label="New thread" delay={headerDelay} />
+            </div>
+          }
+          renderScrollFrame={(renderScrollArea) => (
+            <ProjectPager
+              pages={pagesFor(groups, scopeKey, (key, current) =>
+                renderScrollArea(tipThreadsPage(key, current)),
+              )}
+              scopeKey={scopeKey}
+              onScopeChange={setScopeKey}
+            />
+          )}
+        />
+        <div data-testid="footer" style={{ height: 24 }}>
+          <Tip testId="footer-tip" label="Settings" />
+        </div>
+      </div>
+    </TooltipDismissScope>
+  );
+}
+
+const tooltip = (label: string) => page.getByText(label, { exact: true });
+
+describe("tooltips while swiping between projects", () => {
+  it("closes a focused thread tooltip as a native swipe starts, before the neighbour lands", async () => {
+    await using screen = await render(<TooltipSidebarHarness initialKey={keyOf("beta")} />);
+    await userEvent.tab();
+    await userEvent.tab();
+    await expect.element(screen.getByTestId("row-tip")).toHaveFocus();
+    await expect.element(tooltip("Thread details")).toBeVisible();
+    using _scrollEnd = withoutScrollEnd();
+
+    // A touch swipe, or a trackpad one chained from the list, scrolls the
+    // pager natively without any wheel listener of the sidebar's seeing it.
+    await arriveAt(pagerOf(screen.container), 400);
+    await expect.element(tooltip("Thread details")).not.toBeInTheDocument();
+    expect(screen.getByTestId("live-list").element().textContent).toBe("beta");
+  });
+
+  it("closes a header tooltip on a sideways wheel, even at the last project", async () => {
+    await using screen = await render(<TooltipSidebarHarness initialKey={keyOf("gamma")} />);
+    await userEvent.hover(screen.getByTestId("header-tip"));
+    await expect.element(tooltip("New thread")).toBeVisible();
+
+    wheelBurst(screen.getByTestId("search").element(), 20, 0);
+    await expect.element(tooltip("New thread")).not.toBeInTheDocument();
+    expect(screen.getByTestId("live-list").element().textContent).toBe("gamma");
+  });
+
+  it("keeps a header tooltip open through a vertical wheel", async () => {
+    await using screen = await render(<TooltipSidebarHarness initialKey={keyOf("beta")} />);
+    await userEvent.hover(screen.getByTestId("header-tip"));
+    await expect.element(tooltip("New thread")).toBeVisible();
+
+    wheelBurst(screen.getByTestId("search").element(), 0, 20);
+    await expect.element(tooltip("New thread")).toBeVisible();
+  });
+
+  it("closes a footer tooltip and one opened by keyboard focus, which keeps focus", async () => {
+    await using screen = await render(<TooltipSidebarHarness initialKey={keyOf("beta")} />);
+    const search = screen.getByTestId("search").element();
+    await userEvent.hover(screen.getByTestId("footer-tip"));
+    await expect.element(tooltip("Settings")).toBeVisible();
+    await userEvent.tab();
+    await expect.element(screen.getByTestId("header-tip")).toHaveFocus();
+    await expect.element(tooltip("New thread")).toBeVisible();
+
+    wheelBurst(search, 20, 0);
+    await expect.element(tooltip("New thread")).not.toBeInTheDocument();
+    await expect.element(tooltip("Settings")).not.toBeInTheDocument();
+    await expect.element(screen.getByTestId("header-tip")).toHaveFocus();
+  });
+
+  it("cancels a hover tooltip still waiting on its delay, and opens again on the next hover", async () => {
+    await using screen = await render(
+      <TooltipSidebarHarness initialKey={keyOf("gamma")} headerDelay={300} />,
+    );
+    const search = screen.getByTestId("search").element();
+    {
+      using _timers = fakeTimers();
+      await userEvent.hover(screen.getByTestId("header-tip"));
+      await act(() => vi.advanceTimersByTime(100));
+      wheelBurst(search, 20, 0);
+      await act(() => vi.advanceTimersByTime(1000));
+      expect(tooltip("New thread").query()).toBeNull();
+    }
+
+    await userEvent.unhover(screen.getByTestId("header-tip"));
+    await userEvent.hover(screen.getByTestId("header-tip"));
+    await expect.element(tooltip("New thread")).toBeVisible();
   });
 });
 

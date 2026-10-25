@@ -193,7 +193,7 @@ import {
 } from "./sidebar/project-pager";
 import { useScopedThreadSearch } from "./sidebar/use-scoped-thread-search";
 import { useStableSidebarLists } from "./sidebar/use-stable-sidebar-list";
-import { TooltipProvider } from "./ui/tooltip";
+import { TooltipDismissScope, TooltipProvider } from "./ui/tooltip";
 import { composerDraftHasUserContent, DraftId, useComposerDraftStore } from "../composerDraftStore";
 import { useThreadRouteTarget } from "../hooks/useThreadRouteTarget";
 import {
@@ -3147,7 +3147,8 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
   }));
 
   return (
-    <>
+    // The header and footer tooltips sit outside the pager, and a swipe closes them too.
+    <TooltipDismissScope>
       <ThreadContextDragGhost />
       <SidebarChromeHeader isElectron={isElectron} />
       <SidebarContent
@@ -3216,6 +3217,6 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
         {projectPagerVisible ? null : renderThreadList(livePage, true)}
       </SidebarContent>
       <SidebarChromeFooter />
-    </>
+    </TooltipDismissScope>
   );
 }

@@ -5,6 +5,8 @@ import { useStableCallback } from "~/hooks/useStableCallback";
 import { observeResize } from "~/lib/observeResize";
 import type { SidebarProjectSnapshot } from "~/sidebarProjectGrouping";
 
+import { useDismissTooltips } from "../ui/tooltip";
+
 // Long enough to bridge the frames of one wheel or momentum stream, which
 // arrive every ~16ms, and short enough that the next swipe starts fresh.
 const WHEEL_GESTURE_GAP_MS = 150;
@@ -88,6 +90,9 @@ export function ProjectPager({
   // before effects run, so placement starts from what was on screen.
   const placedRef = useRef<{ scopeKey: string | null; index: number; left: number } | null>(null);
   const index = pages.findIndex((page) => page.scopeKey === scopeKey);
+  // A tooltip left over a page sliding away, or one waiting on its hover
+  // delay, would float over the neighbour, so a swipe closes them as it starts.
+  const dismissTooltips = useDismissTooltips();
 
   const commit = useStableCallback((key: string | null) => onScopeChange(key));
   // A delayed settle must land on the neighbours on screen when it fires, not
@@ -150,20 +155,27 @@ export function ProjectPager({
     const sidebar = pager?.closest('[data-sidebar="sidebar"]');
     if (!pager || !(sidebar instanceof HTMLElement)) return;
     let gesture: Parameters<typeof stepSidebarWheel>[0] = null;
+    // Every sideways gesture, including one over a list or against the first
+    // or last project, where the pager does not move.
+    let intent: Parameters<typeof stepSidebarWheel>[0] = null;
     const onWheel = (event: WheelEvent) => {
       // At a clamped edge the position stops changing while the gesture goes
       // on, so without scrollend only input going quiet can end it.
       if (idleTimerRef.current !== undefined && !reportsScrollEnd(pager)) armIdleTimer();
       const target = event.target;
-      if (!(target instanceof Element) || pager.contains(target)) return;
+      if (!(target instanceof Element)) return;
       const scale = event.deltaMode === WheelEvent.DOM_DELTA_LINE ? 16 : 1;
       // Windows reports a Shift+wheel as vertical delta and scrolls it sideways.
       const sideways = event.shiftKey && event.deltaX === 0;
-      const result = stepSidebarWheel(gesture, {
+      const delta = {
         dx: (sideways ? event.deltaY : event.deltaX) * scale,
         dy: (sideways ? 0 : event.deltaY) * scale,
         at: event.timeStamp,
-      });
+      };
+      intent = stepSidebarWheel(intent, delta).gesture;
+      if (intent.axis === "x") dismissTooltips();
+      if (pager.contains(target)) return;
+      const result = stepSidebarWheel(gesture, delta);
       gesture = result.gesture;
       if (result.step === 0) return;
       pager.scrollBy({
@@ -175,7 +187,7 @@ export function ProjectPager({
     };
     sidebar.addEventListener("wheel", onWheel, { passive: true });
     return () => sidebar.removeEventListener("wheel", onWheel);
-  }, [armIdleTimer]);
+  }, [armIdleTimer, dismissTooltips]);
 
   return (
     <div
@@ -189,6 +201,8 @@ export function ProjectPager({
         const pager = event.currentTarget;
         // Settling only once the gesture ends keeps one fling to one project.
         if (!reportsScrollEnd(pager)) armIdleTimer();
+        // Placing the pages reports its own position; anything else moved them.
+        if (pager.scrollLeft !== placedRef.current?.left) dismissTooltips();
         if (placedRef.current) placedRef.current.left = pager.scrollLeft;
       }}
       onScrollEnd={settle}

@@ -409,7 +409,16 @@ export function reorderProjects(
     return state;
   }
 
-  const insertIndex = originalTargetIndex - Math.max(0, draggedBeforeTarget - 1);
+  // Sidebars show a grouped project at its first key. Moving up lands before
+  // that key; moving down lands after the run of target keys it starts, so
+  // adjacent members stay together and a stray member further down, as in
+  // LegacySidebar's saved order, does not pull the project past others.
+  let insertIndex = projectOrder.findIndex((id) => targetSet.has(id));
+  if (draggedBeforeTarget > 0) {
+    while (insertIndex < projectOrder.length && targetSet.has(projectOrder[insertIndex]!)) {
+      insertIndex++;
+    }
+  }
   projectOrder.splice(insertIndex, 0, ...removed);
   return {
     ...state,

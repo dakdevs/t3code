@@ -92,6 +92,50 @@ describe("uiStateStore pure functions", () => {
 
     expect(next.projectOrder).toEqual([keyB, keyC, keyALocal, keyARemote]);
   });
+
+  it("keeps a grouped project's members together when another project moves past them", () => {
+    const keyA = "env-local:proj-a";
+    const keyBLocal = "env-local:proj-b";
+    const keyBRemote = "env-remote:proj-b";
+    const keyC = "env-local:proj-c";
+    const currentOrder = [keyA, keyBLocal, keyBRemote, keyC];
+
+    expect(
+      reorderProjects(makeUiState(), currentOrder, [keyA], [keyBLocal, keyBRemote]).projectOrder,
+    ).toEqual([keyBLocal, keyBRemote, keyA, keyC]);
+    expect(
+      reorderProjects(makeUiState(), currentOrder, [keyC], [keyBLocal, keyBRemote]).projectOrder,
+    ).toEqual([keyA, keyC, keyBLocal, keyBRemote]);
+  });
+
+  // LegacySidebar passes saved physical order, where a grouped project's keys
+  // can be apart (a second environment's key is appended when it connects).
+  // It shows the group at its first key, so a project dropped on it lands
+  // right after that key's run, not after a stray key further down.
+  it("moves a project just past a grouped project whose keys are apart", () => {
+    const keyY = "env-local:proj-y";
+    const keyBLocal = "env-local:proj-b";
+    const keyA = "env-local:proj-a";
+    const keyC = "env-local:proj-c";
+    const keyBRemote = "env-remote:proj-b";
+
+    expect(
+      reorderProjects(
+        makeUiState(),
+        [keyY, keyBLocal, keyA, keyBRemote],
+        [keyY],
+        [keyBLocal, keyBRemote],
+      ).projectOrder,
+    ).toEqual([keyBLocal, keyY, keyA, keyBRemote]);
+    expect(
+      reorderProjects(
+        makeUiState(),
+        [keyY, keyBLocal, keyA, keyC, keyBRemote],
+        [keyY],
+        [keyBLocal, keyBRemote],
+      ).projectOrder,
+    ).toEqual([keyBLocal, keyY, keyA, keyC, keyBRemote]);
+  });
 });
 
 describe("parsePersistedState", () => {

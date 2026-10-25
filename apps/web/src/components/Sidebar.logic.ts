@@ -797,6 +797,26 @@ export function displayedProjectOrder(
   return [...shown, ...savedOrder.filter((key) => !shownKeys.has(key))];
 }
 
+type ProjectOrderGroup = {
+  readonly memberProjects: ReadonlyArray<{ physicalProjectKey: string }>;
+};
+
+/**
+ * `reorderProjects` arguments for moving `active` to the place `over` holds:
+ * the order on screen, then both projects' member keys, so a grouped project
+ * moves whole and the projects the user did not move keep their places.
+ */
+export function projectGroupMove(
+  groups: ReadonlyArray<ProjectOrderGroup>,
+  savedOrder: readonly string[],
+  active: ProjectOrderGroup,
+  over: ProjectOrderGroup,
+) {
+  const memberKeys = (group: ProjectOrderGroup) =>
+    group.memberProjects.map((member) => member.physicalProjectKey);
+  return [displayedProjectOrder(groups, savedOrder), memberKeys(active), memberKeys(over)] as const;
+}
+
 export function orderItemsByPreferredIds<TItem, TId>(input: {
   items: readonly TItem[];
   preferredIds: readonly TId[];

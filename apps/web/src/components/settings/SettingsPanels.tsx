@@ -439,7 +439,7 @@ export function useSettingsRestore(onRestored?: () => void) {
       : []),
     ...(settings.sidebarProjectSwitcherEnabled !==
     DEFAULT_UNIFIED_SETTINGS.sidebarProjectSwitcherEnabled
-      ? ["Project switcher"]
+      ? ["Swipe between projects"]
       : []),
     ...(settings.sidebarAutoSettleAfterDays !== DEFAULT_UNIFIED_SETTINGS.sidebarAutoSettleAfterDays
       ? ["Auto-settle inactive threads"]
@@ -1009,12 +1009,12 @@ export function GeneralSettingsPanel() {
 
         <SettingsRow
           {...searchableSetting("project-switcher")}
-          description="Replace the project filter with a row of project pills below search, and swipe sideways anywhere over the sidebar to switch projects. Moving a pill switches project order to Manual. Not available with the legacy sidebar."
+          description="Swipe sideways anywhere over the sidebar to move to the next or previous project in the project filter. Not available with the legacy sidebar."
           resetAction={
             settings.sidebarProjectSwitcherEnabled !==
             DEFAULT_UNIFIED_SETTINGS.sidebarProjectSwitcherEnabled ? (
               <SettingResetButton
-                label="project switcher"
+                label="swipe between projects"
                 onClick={() =>
                   updateSettings({
                     sidebarProjectSwitcherEnabled:
@@ -1030,7 +1030,7 @@ export function GeneralSettingsPanel() {
               onCheckedChange={(checked) =>
                 updateSettings({ sidebarProjectSwitcherEnabled: Boolean(checked) })
               }
-              aria-label="Project switcher (beta)"
+              aria-label="Swipe between projects (beta)"
             />
           }
         />

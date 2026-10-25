@@ -7,6 +7,8 @@ declare module "vite-plus/test/browser" {
     resetPointer: () => Promise<void>;
     /** Defined in vite.config.ts. Hovers `selector` and sends real wheel input. */
     wheel: (selector: string, deltaX: number, deltaY: number) => Promise<void>;
+    /** Defined in vite.config.ts. Drags from `from` to `to` with the real mouse. */
+    dragTo: (from: string, to: string) => Promise<void>;
     /** Defined in vite.config.ts. Emulates `prefers-reduced-motion`. */
     emulateReducedMotion: (reduce: boolean) => Promise<void>;
   }

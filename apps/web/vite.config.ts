@@ -129,6 +129,22 @@ const browserTestProject = {
           await iframe.locator(selector).hover();
           await page.mouse.wheel(deltaX, deltaY);
         },
+        // Real mouse input, so the compatibility mouse events and the click a
+        // drag leaves behind reach the page as they would from a user. It moves
+        // in steps from the centre of `from` to the centre of `to`.
+        dragTo: async ({ page, iframe }, from: string, to: string) => {
+          const centreOf = async (selector: string) => {
+            const box = await iframe.locator(selector).boundingBox();
+            if (!box) throw new Error(`${selector} is not visible`);
+            return { x: box.x + box.width / 2, y: box.y + box.height / 2 };
+          };
+          const start = await centreOf(from);
+          const end = await centreOf(to);
+          await page.mouse.move(start.x, start.y);
+          await page.mouse.down();
+          await page.mouse.move(end.x, end.y, { steps: 8 });
+          await page.mouse.up();
+        },
         emulateReducedMotion: async ({ page }, reduce: boolean) => {
           await page.emulateMedia({ reducedMotion: reduce ? "reduce" : "no-preference" });
         },

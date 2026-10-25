@@ -353,9 +353,9 @@ export const SETTINGS_SEARCH_ITEMS = [
   },
   {
     id: "project-switcher",
-    title: "Project switcher (beta)",
+    title: "Swipe between projects (beta)",
     to: "/settings/general",
-    searchTerms: ["sidebar project pills tabs swipe filter reorder"],
+    searchTerms: ["sidebar project switcher swipe trackpad gesture filter"],
   },
   {
     id: "auto-settle-inactive-threads",

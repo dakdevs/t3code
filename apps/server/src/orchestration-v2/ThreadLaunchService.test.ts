@@ -324,6 +324,29 @@ function launchInput(input: {
   };
 }
 
+it.effect("persists draft skills before the first message starts its run", () => {
+  const harness = makeHarness();
+  return Effect.gen(function* () {
+    const launches = yield* ThreadLaunch.ThreadLaunchService;
+    const threads = yield* ThreadManagement.ThreadManagementService;
+    const launched = yield* launches.launch({
+      ...launchInput({
+        command: "command:draft-skills",
+        thread: "thread:draft-skills",
+        message: "Start with no skills",
+      }),
+      skillSelection: { instanceId: modelSelection.instanceId, names: [] },
+    });
+    const projection = yield* threads.getThreadProjection(launched.threadId);
+    assert.deepStrictEqual(projection.thread.skillSelection, {
+      instanceId: modelSelection.instanceId,
+      names: [],
+    });
+    assert.equal(projection.messages.length, 1);
+    assert.equal(projection.runs.length, 1);
+  }).pipe(Effect.provide(harness.layer));
+});
+
 it.effect.each(
   (["new", "existing"] as const).flatMap((target) =>
     (["user", "agent"] as const).map((createdBy) => ({ target, createdBy })),

@@ -152,6 +152,7 @@ it.effect("resets a fork's pin, snooze, settle and delegation state but keeps it
       historyOrigin: "v1_import",
       linkOrigin,
       tags: ["private"],
+      skillSelection: { instanceId: makeSourceThread().providerInstanceId, names: ["review"] },
     };
     const sourceRun = makeSourceRun("completed");
     const result = yield* planFork(sourceRun, {
@@ -175,6 +176,7 @@ it.effect("resets a fork's pin, snooze, settle and delegation state but keeps it
     assert.deepEqual(result.targetThread.modelSelection, sourceThread.modelSelection);
     assert.equal(result.targetThread.runtimeMode, sourceThread.runtimeMode);
     assert.equal(result.targetThread.interactionMode, sourceThread.interactionMode);
+    assert.deepEqual(result.targetThread.skillSelection, sourceThread.skillSelection);
     assert.equal(result.targetThread.branch, sourceThread.branch);
     assert.equal(result.targetThread.worktreePath, sourceThread.worktreePath);
     assert.isNull(result.targetThread.activeProviderThreadId);

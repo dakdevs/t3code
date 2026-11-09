@@ -78,6 +78,7 @@ const SETTINGS_SEARCH_TERMS = {
   SettingsFollowUp: ["follow-ups", "queue", "steer", "while the agent is running"],
   SettingsArchive: ["archive", "archived", "restore", "unarchive"],
   SettingsProviderAccounts: [
+    "skills",
     "provider accounts",
     "codex",
     "claude",

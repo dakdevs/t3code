@@ -12,6 +12,7 @@ import {
   IsoDateTime,
   MessageId,
   ModelSelection,
+  OrchestrationV2ThreadSkillSelection,
   OrchestrationMessageContext,
   ProjectId,
   ProviderInteractionMode,
@@ -35,6 +36,7 @@ const THREAD_OUTBOX_SCHEMA_VERSION = 3;
 const THREAD_OUTBOX_MAX_RETRY_DELAY_MS = 16_000;
 
 const QueuedThreadCreationSchema = Schema.Struct({
+  skillSelection: Schema.optional(Schema.NullOr(OrchestrationV2ThreadSkillSelection)),
   projectId: ProjectId,
   projectTitle: Schema.optional(Schema.String),
   projectCwd: Schema.optional(Schema.String),
@@ -68,6 +70,7 @@ const decodeStoredQueuedThreadMessage = Schema.decodeUnknownSync(QueuedThreadMes
 const encodeStoredQueuedThreadMessage = Schema.encodeUnknownSync(QueuedThreadMessageSchema);
 
 export interface QueuedThreadCreation {
+  readonly skillSelection?: OrchestrationV2ThreadSkillSelection | null;
   readonly projectId: ProjectIdType;
   readonly projectTitle?: string;
   readonly projectCwd?: string;

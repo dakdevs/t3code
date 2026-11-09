@@ -243,6 +243,7 @@ import {
   type ComposerDispatchMode,
 } from "@t3tools/client-runtime/state/composer-dispatch";
 import {
+  hasCompleteProviderWorkspaceSnapshot,
   resolveProviderSkillsForCwd,
   resolveProviderSlashCommandsForCwd,
 } from "@t3tools/client-runtime/providerSkills";
@@ -257,6 +258,7 @@ import { useComposerRestingTransition } from "./useComposerRestingTransition";
 import { ComposerCommandMenuLayer } from "./ComposerCommandMenuLayer";
 import { useRestingComposerControlsLayout } from "./useRestingComposerControlsLayout";
 import { useProviderWorkspaceSnapshotRefresh } from "./useProviderWorkspaceSnapshotRefresh";
+import { ThreadSkillsControl } from "./thread-skills-control";
 import { useComposerProviderModel } from "./useComposerProviderModel";
 import { useComposerImageGroups } from "./useComposerImageGroups";
 import { useComposerStash } from "./useComposerStash";
@@ -345,6 +347,7 @@ export interface ChatComposerProps {
   routeKind: "server" | "draft";
   routeThreadRef: ScopedThreadRef;
   draftId: DraftId | null;
+  isLocalDraftThread: boolean;
   multipleModelSelections: ReadonlyArray<ModelSelection> | null;
   supportsMultipleModels: boolean;
   onMultipleModelSelectionsChange: React.Dispatch<
@@ -487,6 +490,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     composerDraftTarget,
     environmentId,
     canOperateThread,
+    isLocalDraftThread,
     attachmentUploadsCapabilityKnown,
     supportsAttachmentUploads,
     supportsQuestionAttachments,
@@ -2430,6 +2434,21 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
       onModelPickerOpenChange={setIsComposerModelPickerOpen}
       modelPickerIconClassName={composerProviderState.modelPickerIconClassName}
       getModelDisabledReason={getModelDisabledReason}
+      skillsControl={
+        activeThread !== undefined && selectedProviderStatus?.supportsSkillSelection === true ? (
+          <ThreadSkillsControl
+            environmentId={environmentId}
+            thread={activeThread}
+            draftId={draftId}
+            isLocalDraftThread={isLocalDraftThread}
+            canOperate={canOperateThread}
+            instanceId={selectedInstanceId}
+            catalog={selectedProviderSkills}
+            scanning={workspaceSkillsScanning}
+            catalogReady={hasCompleteProviderWorkspaceSnapshot(selectedProviderStatus, gitCwd)}
+          />
+        ) : undefined
+      }
     />
   );
   // An open question owns the space above the composer. Only a machine problem,

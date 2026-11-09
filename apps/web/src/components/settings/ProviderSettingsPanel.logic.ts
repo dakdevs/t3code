@@ -108,6 +108,8 @@ export function buildProviderInstanceOverridePatch(
   return patch;
 }
 
+export { buildProviderSkillsOverridePatch } from "@t3tools/shared/projectSettings";
+
 export function classifyProviderEnvironmentAccess(input: {
   readonly connectionPhase: EnvironmentConnectionPhase;
   readonly hasServerConfig: boolean;

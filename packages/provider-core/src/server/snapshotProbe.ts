@@ -88,6 +88,7 @@ export interface ServerProviderPresentation {
   readonly reportsContextWindow?: boolean;
   readonly supportedRuntimeModes?: ReadonlyArray<RuntimeMode>;
   readonly supportsConversationRollback?: boolean;
+  readonly supportsSkillSelection?: boolean;
 }
 
 export type ServerProviderDraft = Omit<ServerProvider, "instanceId" | "driver">;
@@ -251,6 +252,7 @@ export function buildServerProvider(input: {
     ...(typeof input.presentation.reportsContextWindow === "boolean"
       ? { reportsContextWindow: input.presentation.reportsContextWindow }
       : {}),
+    ...(input.presentation.supportsSkillSelection === true ? { supportsSkillSelection: true } : {}),
     ...(input.presentation.supportedRuntimeModes === undefined
       ? {}
       : { supportedRuntimeModes: [...input.presentation.supportedRuntimeModes] }),

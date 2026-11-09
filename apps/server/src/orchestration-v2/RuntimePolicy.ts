@@ -13,6 +13,7 @@ import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
 import * as Schema from "effect/Schema";
+import { resolveEffectiveProviderSkills } from "@t3tools/shared/projectSettings";
 
 import * as ProviderInstanceRegistry from "../provider/ProviderInstanceRegistry.ts";
 import * as ProviderAdapter from "@t3tools/provider-core/server/ProviderAdapter";
@@ -148,8 +149,9 @@ export const layerFromProjectStore: Layer.Layer<
   Effect.gen(function* () {
     const projects = yield* ProjectStore.ProjectStoreV2;
     const providerInstances = yield* ProviderInstanceRegistry.ProviderInstanceRegistry;
+    const serverSettings = yield* ServerSettings.ServerSettingsService;
     // The same ceiling the orchestrator enforces, fixed for the server's life.
-    const { managedPolicy } = yield* ServerSettings.ServerSettingsService;
+    const { managedPolicy } = serverSettings;
     const maxRuntimeMode = managedPolicy?.limits?.maxRuntimeMode;
     return RuntimePolicyV2.of({
       resolve: Effect.fn("RuntimePolicyV2.resolve")(function* (input) {
@@ -184,11 +186,27 @@ export const layerFromProjectStore: Layer.Layer<
               }),
             ),
           ));
+        const skills = resolveEffectiveProviderSkills({
+          settings: yield* serverSettings.getSettings.pipe(
+            Effect.mapError(
+              (cause) =>
+                new RuntimePolicyResolveError({
+                  projectId: input.thread.projectId,
+                  providerInstanceId: input.modelSelection.instanceId,
+                  cause,
+                }),
+            ),
+          ),
+          projectId: input.thread.projectId,
+          instanceId: input.modelSelection.instanceId,
+          threadSelection: input.thread.skillSelection,
+        });
         return ProviderAdapter.ProviderAdapterV2RuntimePolicy.make({
           runtimeMode: providerRuntimeMode(input.thread.runtimeMode, supportedRuntimeModes),
           interactionMode: input.thread.interactionMode,
           cwd,
           ...(maxRuntimeMode === undefined ? {} : { maxRuntimeMode }),
+          ...(skills === undefined ? {} : { skills }),
         });
       }),
     });

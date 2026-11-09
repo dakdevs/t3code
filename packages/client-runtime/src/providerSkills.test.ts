@@ -13,6 +13,7 @@ import {
   getProviderSkillsForSlashMenu,
   hasCompleteProviderWorkspaceSnapshot,
   isProviderWorkspaceSnapshotScanning,
+  resolveProviderSkillChoices,
   resolveProviderSkillsForCwd,
   resolveProviderSlashCommandsForCwd,
 } from "./providerSkills.ts";
@@ -92,6 +93,44 @@ describe("getProviderSkillsForSlashMenu", () => {
     ];
 
     expect(getProviderSkillsForSlashMenu(skills, true)).toEqual([enabledSkill]);
+  });
+});
+
+describe("resolveProviderSkillChoices", () => {
+  const catalog = [
+    { name: "review", path: "/skills/review/SKILL.md", enabled: true, description: "Review" },
+    { name: "pdf", path: "/skills/pdf/SKILL.md", enabled: true },
+    { name: "deploy", path: "/skills/deploy/SKILL.md", enabled: true, userInvocationOnly: true },
+    { name: "off", path: "/skills/off/SKILL.md", enabled: false },
+  ];
+  const resolve = (
+    offered: ReadonlyArray<string> | undefined,
+    selected: ReadonlyArray<string> | undefined,
+  ) => {
+    const result = resolveProviderSkillChoices({ catalog, offered, selected });
+    return {
+      choices: result.choices.map((choice) => choice.name),
+      selected: [...result.selected].toSorted(),
+    };
+  };
+
+  it("offers agent-invocable catalog skills, all on by default", () => {
+    expect(resolve(undefined, undefined)).toEqual({
+      choices: ["pdf", "review"],
+      selected: ["pdf", "review"],
+    });
+  });
+
+  it("keeps a listed skill missing from the catalog so it can be removed", () => {
+    expect(resolve(undefined, ["gone", "pdf"])).toEqual({
+      choices: ["gone", "pdf", "review"],
+      selected: ["gone", "pdf"],
+    });
+  });
+
+  it("limits a thread's rows to its project's list", () => {
+    expect(resolve(["review"], undefined)).toEqual({ choices: ["review"], selected: ["review"] });
+    expect(resolve(["review"], ["pdf"])).toEqual({ choices: ["review"], selected: [] });
   });
 });
 

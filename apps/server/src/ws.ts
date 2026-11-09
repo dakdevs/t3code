@@ -2260,6 +2260,9 @@ export const layerWsRpc = (
                     runtimeMode: input.runtimeMode,
                     interactionMode: input.interactionMode,
                     workspaceStrategy: input.workspaceStrategy,
+                    ...(input.skillSelection === undefined
+                      ? {}
+                      : { skillSelection: input.skillSelection }),
                     ...(input.initialMessage === undefined
                       ? {}
                       : {

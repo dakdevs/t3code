@@ -1178,8 +1178,12 @@ export const ProjectProviderInstanceOverride = Schema.Struct({
 });
 export type ProjectProviderInstanceOverride = typeof ProjectProviderInstanceOverride.Type;
 
+/** Exact skill names an agent is offered; an empty list offers none. */
+export const ProviderSkillNames = Schema.Array(TrimmedNonEmptyString);
+export type ProviderSkillNames = typeof ProviderSkillNames.Type;
+
 /** Absent keys inherit; null is a value for nullable settings.
- * providerInstances overrides fields per instance; other keys replace the whole setting. */
+ * providerInstances and providerSkills override per instance; other keys replace the whole setting. */
 export const ProjectSettingsOverrides = Schema.Struct({
   worktreeCleanup: Schema.optionalKey(WorktreeCleanup),
   defaultModelSelection: Schema.optionalKey(Schema.NullOr(ModelSelection)),
@@ -1211,7 +1215,12 @@ export const ProjectSettingsOverrides = Schema.Struct({
   providerInstances: Schema.optionalKey(
     Schema.Record(ProviderInstanceId, ProjectProviderInstanceOverride),
   ),
-} satisfies Record<ProjectScopedServerSettingKey | "providerInstances", unknown>);
+  /** An absent instance offers the provider's default skills. */
+  providerSkills: Schema.optionalKey(Schema.Record(ProviderInstanceId, ProviderSkillNames)),
+} satisfies Record<
+  ProjectScopedServerSettingKey | "providerInstances" | "providerSkills",
+  unknown
+>);
 export type ProjectSettingsOverrides = typeof ProjectSettingsOverrides.Type;
 
 // Whole-entry writers must round-trip unknown keys; keep the type closed to catch misspellings.
@@ -1829,7 +1838,7 @@ export const ServerSettingsPatch = Schema.Struct({
   defaultModelSelection: Schema.optionalKey(Schema.NullOr(ModelSelection)),
   defaultRuntimeMode: Schema.optionalKey(RuntimeMode),
   fallbackModelSelection: Schema.optionalKey(Schema.NullOr(ModelSelection)),
-  /** Replaces each project's override set; null removes it. Omitted providerInstances retains its stored value. */
+  /** Replaces each project's override set; null removes it. Omitted providerInstances and providerSkills retain their stored values. */
   projectSettingsOverrides: Schema.optionalKey(
     Schema.Record(
       ProjectId,

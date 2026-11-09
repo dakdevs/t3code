@@ -364,6 +364,9 @@ export async function recoverEditedCreationAfterDelivery(
       ...(kept.modelSelection !== undefined ? { modelSelection: kept.modelSelection } : {}),
       ...(kept.runtimeMode !== undefined ? { runtimeMode: kept.runtimeMode } : {}),
       ...(kept.interactionMode !== undefined ? { interactionMode: kept.interactionMode } : {}),
+      ...(kept.creation?.skillSelection === undefined
+        ? {}
+        : { skillSelection: kept.creation.skillSelection }),
     });
     // Flush before removal: append only schedules persistence, leaving the queue as the sole durable copy.
     await flushComposerDrafts();
@@ -452,6 +455,9 @@ export async function restoreRejectedQueuedMessage(
       ...(queuedMessage.freshContext ? { freshContext: true } : {}),
       ...(queuedMessage.creation
         ? {
+            ...(queuedMessage.creation.skillSelection === undefined
+              ? {}
+              : { skillSelection: queuedMessage.creation.skillSelection }),
             workspaceSelection: {
               mode: queuedMessage.creation.workspaceMode,
               branch: queuedMessage.creation.branch,
@@ -1098,6 +1104,9 @@ export function createThreadOutboxDelivery(): {
         modelSelection: sendSettings.modelSelection,
         runtimeMode: sendSettings.runtimeMode,
         interactionMode: sendSettings.interactionMode,
+        ...(creation.skillSelection === undefined
+          ? {}
+          : { skillSelection: creation.skillSelection }),
         workspaceMode: workspace.workspaceMode,
         branch: workspace.branch,
         worktreePath: workspace.worktreePath,

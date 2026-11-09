@@ -4,10 +4,13 @@ import * as NodeServices from "@effect/platform-node/NodeServices";
 import { assert, it } from "@effect/vitest";
 import {
   AuthSessionId,
+  AuthOrchestrationOperateScope,
   AuthSourceControlWriteScope,
+  CommandId,
   EnvironmentId,
   EventId,
   MessageId,
+  ORCHESTRATION_V2_WS_METHODS,
   ProjectId,
   ThreadId,
   TurnItemId,
@@ -1338,6 +1341,94 @@ it.effect("on-demand clients get provider config without workspace snapshots", (
       },
     ]);
     yield* server.write(0, { _tag: "Interrupt", requestId: configRequest, interruptors: [] });
+  }).pipe(
+    Effect.provide(
+      Layer.mergeAll(
+        Layer.fresh(layerConfigSources),
+        Layer.mock(PreviewAutomationBroker.PreviewAutomationBroker)({}),
+        Layer.mock(ServerBrowser.ServerBrowser)({}),
+      ),
+    ),
+    Effect.scoped,
+  ),
+);
+
+it.effect("thread launch forwards the first message's skill selection", () =>
+  Effect.gen(function* () {
+    const launches = yield* Queue.unbounded<ThreadLaunchService.ThreadLaunchInput>();
+    const exits = yield* Queue.unbounded<string>();
+    const services = Layer.mergeAll(
+      layerUnusedConfigRpcServices,
+      Layer.mock(ThreadLaunchService.ThreadLaunchService)({
+        launch: (input) =>
+          Queue.offer(launches, input).pipe(
+            Effect.andThen(
+              Effect.fail(
+                new ThreadLaunchService.ThreadLaunchError({
+                  operation: "resolve-project",
+                  commandId: input.commandId,
+                  projectId: input.projectId,
+                  cause: "Fixture stops after receiving the launch input",
+                }),
+              ),
+            ),
+          ),
+      }),
+      Layer.mock(ServerRuntimeStartup.ServerRuntimeStartup)({ enqueueCommand: (effect) => effect }),
+      Layer.mock(ExternalLauncher.ExternalLauncher)({}),
+      Layer.mock(ProviderRegistry.ProviderRegistry)({}),
+      Layer.mock(UsageLimitSources.UsageLimitSources)({}),
+      Layer.mock(RemoteOpenTargets.RemoteOpenTargets)({}),
+      Layer.mock(DirectEndpoints.DirectEndpoints)({}),
+      Layer.mock(ManagedProjectFolders.ManagedProjectFolders)({ namedProjectsRoot: "/unused" }),
+      Layer.mock(ScratchThreadPromotion.ScratchThreadPromotion)({}),
+      Layer.mock(ServerEnvironment.ServerEnvironment)({}),
+      Layer.mock(EnvironmentAuth.EnvironmentAuth)({}),
+    );
+    const server = yield* RpcServer.makeNoSerialization(WsRpcGroup, {
+      ...WS_RPC_SERVER_OPTIONS,
+      onFromServer: (response) =>
+        response._tag === "Exit" ? Queue.offer(exits, response.exit._tag) : Effect.void,
+    }).pipe(
+      Effect.provide(
+        layerWsRpc(
+          {
+            sessionId: AuthSessionId.make("skill-launch-test"),
+            subject: "skill-launch-test",
+            method: "browser-session-cookie",
+            scopes: [AuthOrchestrationOperateScope],
+          },
+          {},
+          yield* ServerBrowser.ServerBrowser,
+          () => Effect.void,
+          { secretReferences: true },
+        ).pipe(
+          Layer.provide(services),
+          Layer.merge(RpcAuthorization.layer([AuthOrchestrationOperateScope])),
+        ),
+      ),
+    );
+    yield* server.write(0, {
+      _tag: "Request",
+      id: RpcMessage.RequestId("skill-launch"),
+      tag: ORCHESTRATION_V2_WS_METHODS.launchThread,
+      payload: {
+        commandId: CommandId.make("skill-launch"),
+        projectId: ProjectId.make("skill-project"),
+        title: "Scoped skills",
+        modelSelection: { instanceId: ProviderInstanceId.make("claudeAgent"), model: "haiku" },
+        runtimeMode: "approval-required",
+        interactionMode: "default",
+        workspaceStrategy: { type: "root" },
+        skillSelection: { instanceId: ProviderInstanceId.make("claudeAgent"), names: ["pdf"] },
+      },
+      headers: Headers.empty,
+    });
+    assert.equal(yield* Queue.take(exits), "Failure");
+    assert.deepEqual((yield* Queue.take(launches)).skillSelection, {
+      instanceId: ProviderInstanceId.make("claudeAgent"),
+      names: ["pdf"],
+    });
   }).pipe(
     Effect.provide(
       Layer.mergeAll(

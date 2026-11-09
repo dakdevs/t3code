@@ -56,6 +56,7 @@ import {
   OrchestrationGetTurnDiffResult,
 } from "./checkpointDiff.ts";
 import { ModelSelection } from "./modelSelection.ts";
+import { ProviderSkillNames } from "./settings.ts";
 import {
   ThreadLinkedPullRequest,
   ThreadPullRequestLink,
@@ -441,6 +442,13 @@ const LenientThreadOpens = Schema.NullOr(OrchestrationV2ThreadOpens).pipe(
   Schema.catchDecoding(() => Effect.succeedSome(null)),
 );
 
+/** A thread's narrowing of its project's skill defaults; it applies only while the thread uses `instanceId`. */
+export const OrchestrationV2ThreadSkillSelection = Schema.Struct({
+  instanceId: ProviderInstanceId,
+  names: ProviderSkillNames,
+});
+export type OrchestrationV2ThreadSkillSelection = typeof OrchestrationV2ThreadSkillSelection.Type;
+
 export const OrchestrationV2AppThread = Schema.Struct({
   ...OrchestrationV2CreationFields,
   id: ThreadId,
@@ -450,6 +458,8 @@ export const OrchestrationV2AppThread = Schema.Struct({
   modelSelection: ModelSelection,
   runtimeMode: RuntimeMode,
   interactionMode: ProviderInteractionMode,
+  /** Absent or null inherits the project's skills. */
+  skillSelection: Schema.optional(Schema.NullOr(OrchestrationV2ThreadSkillSelection)),
   branch: Schema.NullOr(TrimmedNonEmptyString),
   worktreePath: Schema.NullOr(TrimmedNonEmptyString),
   linkedPullRequest: Schema.optional(Schema.NullOr(ThreadLinkedPullRequest)),
@@ -2102,6 +2112,8 @@ export const OrchestrationV2ThreadShell = Schema.Struct({
   modelSelection: ModelSelection,
   runtimeMode: RuntimeMode,
   interactionMode: ProviderInteractionMode,
+  /** Absent or null inherits the project's skills. */
+  skillSelection: Schema.optional(Schema.NullOr(OrchestrationV2ThreadSkillSelection)),
   branch: Schema.NullOr(TrimmedNonEmptyString),
   worktreePath: Schema.NullOr(TrimmedNonEmptyString),
   linkedPullRequest: Schema.optional(Schema.NullOr(ThreadLinkedPullRequest)),
@@ -2946,6 +2958,7 @@ export const OrchestrationV2Command = Schema.Union([
     modelSelection: ModelSelection,
     runtimeMode: RuntimeMode,
     interactionMode: ProviderInteractionMode,
+    skillSelection: Schema.optional(Schema.NullOr(OrchestrationV2ThreadSkillSelection)),
     branch: Schema.NullOr(TrimmedNonEmptyString),
     worktreePath: Schema.NullOr(TrimmedNonEmptyString),
     /** Only the server sets this; a client's thread.create never carries one. */
@@ -3162,6 +3175,13 @@ export const OrchestrationV2Command = Schema.Union([
     commandId: CommandId,
     threadId: ThreadId,
     interactionMode: ProviderInteractionMode,
+  }),
+  Schema.Struct({
+    type: Schema.Literal("thread.skills.set"),
+    commandId: CommandId,
+    threadId: ThreadId,
+    /** Null inherits the project's skills. */
+    skillSelection: Schema.NullOr(OrchestrationV2ThreadSkillSelection),
   }),
   Schema.Struct({
     type: Schema.Literal("thread.model-selection.set"),
@@ -3689,6 +3709,7 @@ export const OrchestrationV2ThreadLaunchInput = Schema.Struct({
   modelSelection: ModelSelection,
   runtimeMode: RuntimeMode,
   interactionMode: ProviderInteractionMode,
+  skillSelection: Schema.optional(Schema.NullOr(OrchestrationV2ThreadSkillSelection)),
   workspaceStrategy: OrchestrationV2ThreadLaunchWorkspaceStrategy,
   initialMessage: Schema.optional(
     Schema.Struct({

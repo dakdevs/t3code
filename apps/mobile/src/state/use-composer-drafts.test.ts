@@ -195,6 +195,7 @@ import {
   findNewTaskDraftKeys,
   flushComposerDrafts,
   getComposerDraftSnapshot,
+  isComposerDraftEmpty,
   mergeComposerDraftContentState,
   migrateLegacyNewTaskDraft,
   modelOptionMemoryAtom,
@@ -1743,6 +1744,24 @@ describe("mobile composer drafts", () => {
     } finally {
       composerDraftFileMocks.setWriteError(null);
     }
+  });
+
+  it("keeps a skill-only draft through persistence so its first message stays scoped", () => {
+    const decoded = decodePersistedComposerState({
+      schemaVersion: 1,
+      drafts: {
+        "new-task:skills-only": {
+          text: "",
+          attachments: [],
+          skillSelection: { instanceId: "claudeAgent", names: [] },
+        },
+      },
+    });
+    expect(decoded.drafts["new-task:skills-only"]?.skillSelection).toEqual({
+      instanceId: "claudeAgent",
+      names: [],
+    });
+    expect(isComposerDraftEmpty(decoded.drafts["new-task:skills-only"]!)).toBe(false);
   });
 
   it("hydrates selector state even when the message content is empty", () => {

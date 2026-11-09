@@ -4294,6 +4294,63 @@ describe("ClaudeAdapterV2 background wake turns", () => {
       ),
     );
 
+    it.effect("opens Claude with the turn's skills and reopens when they change", () =>
+      Effect.gen(function* () {
+        const harness = yield* makeWakeHarnessWithOptions({
+          close: Queue.shutdown,
+          freshQueueOnReopen: true,
+        });
+        const now = yield* DateTime.now;
+        let ordinal = 0;
+        const runTurn = (skills: ReadonlyArray<string> | undefined) =>
+          Effect.gen(function* () {
+            ordinal += 1;
+            yield* harness.runtime.startTurn(
+              makeClaudeTestTurnInput({
+                threadId: harness.threadId,
+                providerThread: harness.providerThread,
+                now,
+                attemptId: RunAttemptId.make(`attempt-skills-${ordinal}`),
+                providerTurnOrdinal: ordinal,
+                text: "Summarize the change.",
+                attachments: [],
+                runtimePolicy: ProviderAdapter.ProviderAdapterV2RuntimePolicy.make({
+                  runtimeMode: "auto",
+                  interactionMode: "default",
+                  cwd: "/unrestricted",
+                  ...(skills === undefined ? {} : { skills }),
+                }),
+              }),
+            );
+            const opened = harness.getOpenedOptions();
+            yield* harness.offerAndWait(
+              makeResultFrame({ uuid: `skills-result-${ordinal}`, result: "Done." }),
+            );
+            yield* Queue.take(harness.terminalReceipts);
+            return opened;
+          });
+
+        const narrowed = yield* runTurn(["review"]);
+        assert.deepStrictEqual(narrowed?.skills, ["review"]);
+        assert.strictEqual(yield* runTurn(["review"]), narrowed);
+        const none = yield* runTurn([]);
+        assert.notStrictEqual(none, narrowed);
+        assert.deepStrictEqual(none?.skills, []);
+        const providerDefault = yield* runTurn(undefined);
+        assert.notStrictEqual(providerDefault, none);
+        assert.isFalse(providerDefault !== undefined && "skills" in providerDefault);
+      }).pipe(
+        Effect.provide(
+          Layer.mergeAll(
+            IdAllocator.layer,
+            McpProviderSessions.layer,
+            NodeServices.layer,
+            NodeCrypto.layer,
+          ),
+        ),
+      ),
+    );
+
     // regression: #21806 bypass policy reads the custom home and project, never ambient ~/.claude
     it.effect(
       "combines a normalized custom home with project policy without reading the ambient user tier",

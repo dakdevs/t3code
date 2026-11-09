@@ -3,6 +3,7 @@ import type { PromptUltrathink } from "./TraitsPicker";
 import type { ProviderInstanceEntry } from "../../providerInstances";
 import { type AppModelOption } from "../../modelSelection";
 import { CircleAlertIcon } from "lucide-react";
+import type { ReactNode } from "react";
 import { CompactComposerControlsMenu } from "./CompactComposerControlsMenu";
 import { ComposerControl } from "./ComposerControl";
 import {
@@ -85,6 +86,7 @@ export function ComposerControlsBar(props: {
   onModelPickerOpenChange: (open: boolean) => void;
   modelPickerIconClassName: string | undefined;
   getModelDisabledReason: ChatComposerProps["getModelDisabledReason"];
+  skillsControl?: ReactNode;
 }) {
   const {
     environmentId,
@@ -226,6 +228,7 @@ export function ComposerControlsBar(props: {
           runtimeMode={compatibleRuntimeMode}
           runtimeModeOptions={compatibleRuntimeModeOptions}
           onRuntimeModeChange={handleRuntimeModeChange}
+          skills={props.skillsControl}
         />
       }
       terminalOpen={terminalOpen}

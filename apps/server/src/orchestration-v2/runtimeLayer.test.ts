@@ -2611,6 +2611,25 @@ it.layer(layerTest)("OrchestrationV2LayerLive lifecycle", (it) => {
         threadId,
         interactionMode: "plan",
       });
+      const skillSelection = { instanceId: modelSelection.instanceId, names: ["review"] };
+      yield* orchestrator.dispatch({
+        type: "thread.skills.set",
+        commandId: CommandId.make("runtime-layer-lifecycle-skills"),
+        threadId,
+        skillSelection,
+      });
+      assert.deepEqual(
+        (yield* orchestrator.getShellSnapshot()).threads.find((thread) => thread.id === threadId)
+          ?.skillSelection,
+        skillSelection,
+      );
+      yield* orchestrator.dispatch({
+        type: "thread.skills.set",
+        commandId: CommandId.make("runtime-layer-lifecycle-skills-inherit"),
+        threadId,
+        skillSelection: null,
+      });
+      assert.isNull((yield* orchestrator.getThreadProjection(threadId)).thread.skillSelection);
       yield* orchestrator.dispatch({
         type: "thread.model-selection.set",
         commandId: CommandId.make("runtime-layer-lifecycle-model"),

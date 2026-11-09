@@ -1199,6 +1199,9 @@ export function useComposerSend(input: ComposerSendInput) {
                       branch: activeThreadBranch,
                       worktreePath: activeThread.worktreePath,
                       createdAt: activeThread.createdAt,
+                      ...(draftThread?.skillSelection === undefined
+                        ? {}
+                        : { skillSelection: draftThread.skillSelection }),
                     },
                   }
                 : {}),

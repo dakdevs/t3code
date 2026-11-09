@@ -451,6 +451,7 @@ export function buildLocalDraftThread(
     providerInstanceId: fallbackModelSelection.instanceId,
     modelSelection: fallbackModelSelection,
     runtimeMode: draftThread.runtimeMode,
+    skillSelection: draftThread.skillSelection ?? null,
     interactionMode: draftThread.interactionMode,
     branch: draftThread.branch,
     worktreePath: draftThread.worktreePath,

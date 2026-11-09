@@ -8,6 +8,7 @@ import { describe, expect, it } from "vite-plus/test";
 
 import {
   buildProviderInstanceOverridePatch,
+  buildProviderSkillsOverridePatch,
   resolveRemoteOperateAccess,
 } from "./ProviderSettingsPanel.logic";
 
@@ -60,6 +61,46 @@ describe("buildProviderInstanceOverridePatch", () => {
       buildProviderInstanceOverridePatch(settings, [projectId], instanceId, undefined),
     ).toEqual({
       [projectId]: { newWorktreesStartFromOrigin: true, providerInstances: {} },
+    });
+  });
+});
+
+describe("buildProviderSkillsOverridePatch", () => {
+  const projectId = ProjectId.make("project-a");
+  const siblingId = ProjectId.make("project-a-worktree");
+  const instanceId = ProviderInstanceId.make("claudeAgent");
+
+  it("writes a list, including an empty one, to every checkout and keeps their other overrides", () => {
+    const settings: Pick<ServerSettings, "projectSettingsOverrides"> = {
+      projectSettingsOverrides: {
+        [siblingId]: { providerInstances: { [instanceId]: { enabled: true } } },
+      },
+    };
+
+    expect(
+      buildProviderSkillsOverridePatch(settings, [projectId, siblingId], instanceId, []),
+    ).toEqual({
+      [projectId]: { providerSkills: { [instanceId]: [] } },
+      [siblingId]: {
+        providerInstances: { [instanceId]: { enabled: true } },
+        providerSkills: { [instanceId]: [] },
+      },
+    });
+  });
+
+  it("restores the provider default by dropping the instance, or the entry when nothing remains", () => {
+    const settings: Pick<ServerSettings, "projectSettingsOverrides"> = {
+      projectSettingsOverrides: {
+        [projectId]: { providerSkills: { [instanceId]: ["review"] } },
+        [siblingId]: { defaultAutoPull: true, providerSkills: { [instanceId]: ["review"] } },
+      },
+    };
+
+    expect(
+      buildProviderSkillsOverridePatch(settings, [projectId, siblingId], instanceId, undefined),
+    ).toEqual({
+      [projectId]: null,
+      [siblingId]: { defaultAutoPull: true, providerSkills: {} },
     });
   });
 });

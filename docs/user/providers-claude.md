@@ -97,6 +97,27 @@ can still be started by you. Invoke those one per message: Claude directly runs
 only the last named skill and may try to start earlier ones through its Skill
 tool, which refuses skills reserved for manual invocation.
 
+### Choose which skills agents get
+
+By default, agents get every skill Claude finds. To limit a project, select it in
+**Settings → Providers**, open the Claude provider, and use **Available skills** under
+**Skills**. **None** gives agents no skills, and reset returns to Claude's default. New
+threads, including delegated and scheduled ones, start with the project's list. On mobile,
+select the project in the Settings filter, open **Providers**, then **Claude project skills**.
+
+A thread can narrow its project's list further: open the model picker in the composer and use
+**Skills**, or on mobile use **Skills** in thread settings. You can choose the list before
+sending a new thread's first message. **Use project skills** drops the
+thread's own list. A thread's list belongs to the provider it was chosen for, so switching
+providers uses the new provider's project list. Forks keep the list.
+
+Changes apply to the next message. If Claude is still running background agents or commands,
+wait for them to finish or press Stop first.
+
+The list controls which skills agents see and can start; it is not a security boundary. Skill
+files stay readable on disk, and Claude's own subagents may still load skills that are not
+listed. You can still run any skill yourself by naming it last in your message.
+
 ## Task lists
 
 To show Claude task lists in the web and desktop apps, add

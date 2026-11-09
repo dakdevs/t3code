@@ -10,6 +10,7 @@ import type {
   OrchestrationV2ProviderFailureClass,
   OrchestrationV2ThreadProjection,
   OrchestrationV2ThreadShell,
+  OrchestrationV2ThreadSkillSelection,
   PlanId,
   ProjectId,
   ProviderInstanceId,
@@ -143,6 +144,7 @@ export interface EnvironmentThreadShell {
   readonly modelSelection: OrchestrationV2ThreadShell["modelSelection"];
   readonly runtimeMode: OrchestrationV2ThreadShell["runtimeMode"];
   readonly interactionMode: OrchestrationV2ThreadShell["interactionMode"];
+  readonly skillSelection: OrchestrationV2ThreadSkillSelection | null;
   readonly branch: string | null;
   readonly worktreePath: string | null;
   readonly lineage: OrchestrationV2ThreadShell["lineage"];
@@ -290,6 +292,7 @@ export function presentThreadShell(
     modelSelection: thread.modelSelection,
     runtimeMode: thread.runtimeMode,
     interactionMode: thread.interactionMode,
+    skillSelection: thread.skillSelection ?? null,
     branch: thread.branch,
     worktreePath: thread.worktreePath,
     pullRequests: threadPullRequestsOf(thread),

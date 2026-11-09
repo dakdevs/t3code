@@ -7,6 +7,7 @@ import {
   flushComposerDrafts,
   getComposerDraftSnapshot,
   mergeComposerDraftContent,
+  updateComposerDraftSettings,
 } from "./use-composer-drafts";
 
 export async function recoverFailedThreadDraft(message: QueuedThreadMessage): Promise<void> {
@@ -28,6 +29,8 @@ export async function recoverFailedThreadDraft(message: QueuedThreadMessage): Pr
     source.attachments.filter((attachment) => !existingIds.has(attachment.id)),
     { allowOverflow: true },
   );
+  const skillSelection = source.skillSelection ?? message.creation?.skillSelection;
+  if (skillSelection !== undefined) updateComposerDraftSettings(targetKey, { skillSelection });
   // Recovery may exceed caps; preserve every file and leave trimming to the editor.
   await flushComposerDrafts();
   clearComposerDraftContent(sourceKey);

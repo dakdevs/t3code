@@ -13,6 +13,7 @@ import {
   type NodeId,
   type OrchestrationV2Command,
   type OrchestrationV2CreationSource,
+  type OrchestrationV2ThreadSkillSelection,
   type PlanId,
   type ProjectId,
   type ProjectIconOverride,
@@ -74,6 +75,7 @@ export interface CreateThreadInput extends CommandMetadata {
   readonly projectId: ProjectId;
   readonly title: string;
   readonly modelSelection: ModelSelection;
+  readonly skillSelection?: OrchestrationV2ThreadSkillSelection | null;
   readonly runtimeMode: RuntimeMode;
   readonly interactionMode: ProviderInteractionMode;
   readonly branch: string | null;
@@ -150,6 +152,7 @@ interface StartThreadBootstrap {
     readonly projectId: ProjectId;
     readonly title: string;
     readonly modelSelection: ModelSelection;
+    readonly skillSelection?: OrchestrationV2ThreadSkillSelection | null;
     readonly runtimeMode: RuntimeMode;
     readonly interactionMode: ProviderInteractionMode;
     readonly branch: string | null;
@@ -409,6 +412,7 @@ export const createThread = Effect.fn("EnvironmentCommands.createThread")(functi
     modelSelection: input.modelSelection,
     runtimeMode: input.runtimeMode,
     interactionMode: input.interactionMode,
+    ...(input.skillSelection === undefined ? {} : { skillSelection: input.skillSelection }),
     branch: input.branch,
     worktreePath: input.worktreePath,
   });
@@ -669,6 +673,19 @@ export const setThreadInteractionMode = Effect.fn("EnvironmentCommands.setThread
   },
 );
 
+export const setThreadSkills = Effect.fn("EnvironmentCommands.setThreadSkills")(function* (
+  input: ThreadCommandInput & {
+    readonly skillSelection: OrchestrationV2ThreadSkillSelection | null;
+  },
+) {
+  return yield* dispatch({
+    type: "thread.skills.set",
+    commandId: yield* allocateCommandId(input),
+    threadId: input.threadId,
+    skillSelection: input.skillSelection,
+  });
+});
+
 export const startThreadTurn = Effect.fn("EnvironmentCommands.startThreadTurn")(function* (
   input: StartThreadTurnInput,
 ) {
@@ -723,6 +740,9 @@ export const startThreadTurn = Effect.fn("EnvironmentCommands.startThreadTurn")(
       runtimeMode: input.runtimeMode,
       interactionMode: input.interactionMode,
       workspaceStrategy,
+      ...(bootstrap?.skillSelection === undefined
+        ? {}
+        : { skillSelection: bootstrap.skillSelection }),
       initialMessage: {
         messageId: input.message.messageId,
         text: input.message.text,

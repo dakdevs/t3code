@@ -692,6 +692,8 @@ interface ProviderInstanceCardProps {
   readonly environmentId?: EnvironmentId | undefined;
   readonly secretSources?: ReadonlyArray<SecretSource>;
   readonly projectOverride?: ProjectOverrideControl | undefined;
+  /** Project-scoped skill controls, shown in the editor. */
+  readonly skills?: ReactNode;
   readonly acpProjects?:
     | ReadonlyArray<{
         readonly id: ProjectId;
@@ -737,6 +739,7 @@ export function ProviderInstanceCard({
   acpProjects = EMPTY_ACP_PROJECTS,
   secretSources = NO_SECRET_SOURCES,
   projectOverride,
+  skills,
 }: ProviderInstanceCardProps) {
   const enabled = projectOverride?.effectiveEnabled ?? resolveProviderInstanceEnabled(instance);
   const effectiveProvider = liveProvider && { ...liveProvider, enabled };
@@ -1384,6 +1387,8 @@ export function ProviderInstanceCard({
           readOnly={readOnly}
         />
       ) : null}
+
+      {skills ? <SettingsSection title="Skills">{skills}</SettingsSection> : null}
 
       {driverOption !== undefined ? (
         <SettingsSection title="Models">

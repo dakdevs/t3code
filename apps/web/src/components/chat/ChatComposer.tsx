@@ -2432,12 +2432,11 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
       modelPickerIconClassName={composerProviderState.modelPickerIconClassName}
       getModelDisabledReason={getModelDisabledReason}
       skillsControl={
-        routeKind === "server" &&
-        activeThread !== undefined &&
-        selectedProviderStatus?.supportsSkillSelection === true ? (
+        activeThread !== undefined && selectedProviderStatus?.supportsSkillSelection === true ? (
           <ThreadSkillsControl
             environmentId={environmentId}
             thread={activeThread}
+            draftId={draftId}
             instanceId={selectedInstanceId}
             catalog={selectedProviderSkills}
             scanning={workspaceSkillsScanning}

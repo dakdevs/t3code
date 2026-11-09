@@ -102,10 +102,12 @@ tool, which refuses skills reserved for manual invocation.
 By default, agents get every skill Claude finds. To limit a project, select it in
 **Settings → Providers**, open the Claude provider, and use **Available skills** under
 **Skills**. **None** gives agents no skills, and reset returns to Claude's default. New
-threads, including delegated and scheduled ones, start with the project's list.
+threads, including delegated and scheduled ones, start with the project's list. On mobile,
+select the project in the Settings filter, open **Providers**, then **Claude project skills**.
 
 A thread can narrow its project's list further: open the model picker in the composer and use
-**Skills**, or on mobile use **Skills** in thread settings. **Use project skills** drops the
+**Skills**, or on mobile use **Skills** in thread settings. You can choose the list before
+sending a new thread's first message. **Use project skills** drops the
 thread's own list. A thread's list belongs to the provider it was chosen for, so switching
 providers uses the new provider's project list. Forks keep the list.
 

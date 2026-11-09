@@ -685,12 +685,17 @@ describe("thread outbox recovery rollback", () => {
     );
     appAtomRegistry.set(composerDrafts.composerDraftsAtom, {
       [targetKey]: { text: message.text, attachments: files.slice(0, 8) },
-      [sourceKey]: { text: "Please include tests", attachments: files.slice(8) },
+      [sourceKey]: {
+        text: "Please include tests",
+        attachments: files.slice(8),
+        skillSelection: { instanceId: ProviderInstanceId.make("claudeAgent"), names: [] },
+      },
     });
     await recoverFailedThreadDraft(message);
     expect(composerDrafts.getComposerDraftSnapshot(targetKey)).toMatchObject({
       text: "Original prompt\n\nPlease include tests",
       attachments: files,
+      skillSelection: { instanceId: "claudeAgent", names: [] },
     });
     expect(composerDrafts.getComposerDraftSnapshot(sourceKey)).toMatchObject({
       text: "",

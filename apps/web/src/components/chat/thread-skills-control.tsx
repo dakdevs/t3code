@@ -3,6 +3,7 @@ import { resolveProviderSkillChoices } from "@t3tools/client-runtime/providerSki
 import type { EnvironmentId, ProviderInstanceId, ServerProviderSkill } from "@t3tools/contracts";
 import { ChevronUpIcon, SparklesIcon } from "lucide-react";
 
+import { useComposerDraftStore, type DraftId } from "../../composerDraftStore";
 import { useEnvironmentSettings } from "../../hooks/useSettings";
 import { serverEnvironment } from "../../state/server";
 import { threadEnvironment } from "../../state/threads";
@@ -13,6 +14,7 @@ import { composerFloatingLayerProps } from "./composerEventScope";
 
 /** Narrows the project's skills for one thread; the next message starts with the new list. */
 export function ThreadSkillsControl(props: {
+  readonly draftId?: DraftId | null;
   readonly environmentId: EnvironmentId;
   readonly thread: Pick<Thread, "id" | "projectId" | "skillSelection">;
   readonly instanceId: ProviderInstanceId;
@@ -46,14 +48,20 @@ export function ThreadSkillsControl(props: {
     choices.length === 0
       ? "Skills"
       : describeSkillAllowlist({ selectedCount: selected.size, total: choices.length });
-  const setSelection = (names: ReadonlyArray<string> | null) =>
+  const setSelection = (names: ReadonlyArray<string> | null) => {
+    const skillSelection = names === null ? null : { instanceId: props.instanceId, names };
+    if (props.draftId) {
+      useComposerDraftStore.getState().setDraftThreadContext(props.draftId, { skillSelection });
+      return;
+    }
     void setThreadSkills({
       environmentId: props.environmentId,
       input: {
         threadId: props.thread.id,
-        skillSelection: names === null ? null : { instanceId: props.instanceId, names },
+        skillSelection,
       },
     });
+  };
 
   if (!supported) return null;
   return (

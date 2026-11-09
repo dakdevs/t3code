@@ -262,7 +262,6 @@ type ThreadSettingsSubmenuPage =
   | { readonly kind: "runtime" }
   | { readonly kind: "skills" };
 
-/** An existing thread's narrowing of its project's skills; dispatched as soon as it changes. */
 type ThreadSettingsSkills = {
   readonly label: string;
   readonly choices: ReadonlyArray<ProviderSkillChoice>;
@@ -287,7 +286,7 @@ type ThreadSettingsSessionProps = {
   readonly onUpdateOptionSelections: (selections: ReadonlyArray<ProviderOptionSelection>) => void;
   readonly runtimeMode: RuntimeMode;
   readonly onUpdateRuntimeMode: (mode: RuntimeMode) => void;
-  readonly skills?: ThreadSettingsSkills;
+  readonly resolveSkills?: (instanceId: ProviderInstanceId) => ThreadSettingsSkills | undefined;
 };
 
 /** The composer draft the sheet edits: the thread's own, or a queued message being edited. */
@@ -621,7 +620,7 @@ function ThreadSettingsSessionProvider(
     runtimeMode: compatibleRuntimeMode,
     runtimeModeChoices,
     onUpdateRuntimeMode: props.onUpdateRuntimeMode,
-    skills: props.skills,
+    skills: displayedModel ? props.resolveSkills?.(displayedModel.selection.instanceId) : undefined,
     displayedDescriptors,
     promptTraits,
     displayedModelSelection: pendingModel?.selection ?? props.selectedModel,
@@ -1508,31 +1507,29 @@ export function ExistingThreadSettingsRouteScreen({
     ) ?? null;
   const updateModelSelection = (selection: ModelSelection) =>
     selectThreadModel(route.params, selection);
-  const skillsProvider = serverConfig?.providers.find(
-    (provider) => provider.instanceId === modelSelection.instanceId,
-  );
-  const skillsCwd = selectedThread.worktreePath ?? selectedThreadProject?.workspaceRoot ?? null;
-  const projectSkills =
-    serverConfig?.settings.projectSettingsOverrides[selectedThread.projectId]?.providerSkills?.[
-      modelSelection.instanceId
-    ];
-  const threadSkillSelection =
-    selectedThread.skillSelection?.instanceId === modelSelection.instanceId
-      ? selectedThread.skillSelection
-      : null;
-  const skillChoices =
-    skillsProvider === undefined
-      ? null
-      : resolveProviderSkillChoices({
-          catalog: resolveProviderSkillsForCwd(skillsProvider, skillsCwd),
-          offered: projectSkills,
-          selected: threadSkillSelection?.names,
-        });
-  // Older servers ignore skill selections, and only some providers honor them.
-  const skills =
-    serverConfig?.environment.capabilities.providerSkillSelection === true &&
-    skillsProvider?.supportsSkillSelection === true &&
-    skillChoices !== null
+  const thread = selectedThread;
+  const resolveSkills = (instanceId: ProviderInstanceId): ThreadSettingsSkills | undefined => {
+    const skillsProvider = serverConfig?.providers.find(
+      (provider) => provider.instanceId === instanceId,
+    );
+    const skillsCwd = thread.worktreePath ?? selectedThreadProject?.workspaceRoot ?? null;
+    const projectSkills =
+      serverConfig?.settings.projectSettingsOverrides[thread.projectId]?.providerSkills?.[
+        instanceId
+      ];
+    const threadSkillSelection =
+      thread.skillSelection?.instanceId === instanceId ? thread.skillSelection : null;
+    const skillChoices =
+      skillsProvider === undefined
+        ? null
+        : resolveProviderSkillChoices({
+            catalog: resolveProviderSkillsForCwd(skillsProvider, skillsCwd),
+            offered: projectSkills,
+            selected: threadSkillSelection?.names,
+          });
+    return serverConfig?.environment.capabilities.providerSkillSelection === true &&
+      skillsProvider?.supportsSkillSelection === true &&
+      skillChoices !== null
       ? {
           ...skillChoices,
           label:
@@ -1544,15 +1541,15 @@ export function ExistingThreadSettingsRouteScreen({
           overridden: threadSkillSelection !== null,
           onChange: (names: ReadonlyArray<string> | null) =>
             void setThreadSkills({
-              environmentId: selectedThread.environmentId,
+              environmentId: thread.environmentId,
               input: {
-                threadId: selectedThread.id,
-                skillSelection:
-                  names === null ? null : { instanceId: modelSelection.instanceId, names },
+                threadId: thread.id,
+                skillSelection: names === null ? null : { instanceId, names },
               },
             }),
         }
       : undefined;
+  };
 
   return (
     <ThreadSettingsPickerScreen
@@ -1577,7 +1574,7 @@ export function ExistingThreadSettingsRouteScreen({
       }}
       runtimeMode={draftSettings.runtimeMode ?? selectedThread.runtimeMode}
       onUpdateRuntimeMode={(runtimeMode) => updateComposerDraftSettings(threadKey, { runtimeMode })}
-      {...(skills === undefined ? {} : { skills })}
+      resolveSkills={resolveSkills}
       onClose={() => navigation.goBack()}
     />
   );
@@ -1592,6 +1589,38 @@ export function NewTaskThreadSettingsRouteScreen() {
     selections: flow.selectedModel?.options,
   });
 
+  const serverConfigs = useAtomValue(environmentServerConfigsAtom);
+  const config = flow.selectedEnvironmentId
+    ? serverConfigs.get(flow.selectedEnvironmentId)
+    : undefined;
+  const resolveSkills = (instanceId: ProviderInstanceId): ThreadSettingsSkills | undefined => {
+    const provider = config?.providers.find((entry) => entry.instanceId === instanceId);
+    if (
+      config?.environment.capabilities.providerSkillSelection !== true ||
+      provider?.supportsSkillSelection !== true
+    )
+      return undefined;
+    const selection = flow.skillSelection?.instanceId === instanceId ? flow.skillSelection : null;
+    const choices = resolveProviderSkillChoices({
+      catalog: resolveProviderSkillsForCwd(
+        provider,
+        flow.selectedWorktreePath ?? flow.selectedProject?.workspaceRoot ?? null,
+      ),
+      offered: flow.selectedProject
+        ? config.settings.projectSettingsOverrides[flow.selectedProject.id]?.providerSkills?.[
+            instanceId
+          ]
+        : undefined,
+      selected: selection?.names,
+    });
+    return {
+      ...choices,
+      label: `${choices.selected.size} of ${choices.choices.length}`,
+      overridden: selection !== null,
+      onChange: (names) => flow.setSkillSelection(names === null ? null : { instanceId, names }),
+    };
+  };
+
   return (
     <ThreadSettingsPickerScreen
       environmentId={flow.selectedEnvironmentId}
@@ -1605,6 +1634,7 @@ export function NewTaskThreadSettingsRouteScreen() {
       restoreSelection={withRememberedModelOptions}
       optionDescriptors={optionDescriptors}
       onUpdateOptionSelections={flow.setSelectedModelOptions}
+      resolveSkills={resolveSkills}
       runtimeMode={flow.runtimeMode}
       onUpdateRuntimeMode={flow.setRuntimeMode}
       onClose={() => navigation.goBack()}

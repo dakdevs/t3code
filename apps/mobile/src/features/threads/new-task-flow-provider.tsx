@@ -149,6 +149,10 @@ type NewTaskFlowContextValue = {
   readonly branchesLoading: boolean;
   readonly availableBranches: ReadonlyArray<VcsRef>;
   readonly currentCheckoutBranchName: string | null;
+  readonly skillSelection: import("@t3tools/contracts").OrchestrationV2ThreadSkillSelection | null;
+  readonly setSkillSelection: (
+    selection: import("@t3tools/contracts").OrchestrationV2ThreadSkillSelection | null,
+  ) => void;
   readonly runtimeMode: RuntimeMode;
   readonly expandedProvider: string | null;
   readonly environments: ReadonlyArray<{
@@ -733,6 +737,7 @@ export function NewTaskFlowProvider(
       ),
       interactionMode: DEFAULT_PROVIDER_INTERACTION_MODE,
       creation: {
+        ...(draft.skillSelection == null ? {} : { skillSelection: draft.skillSelection }),
         projectId: selectedProject.id,
         projectTitle: selectedProject.title,
         projectCwd: selectedProject.workspaceRoot,
@@ -839,6 +844,11 @@ export function NewTaskFlowProvider(
     availableBranches,
     currentCheckoutBranchName,
     runtimeMode,
+    skillSelection: selectedProjectDraft.skillSelection ?? null,
+    setSkillSelection: (skillSelection) => {
+      if (selectedProjectDraftKey)
+        updateComposerDraftSettings(selectedProjectDraftKey, { skillSelection });
+    },
     expandedProvider,
     environments,
     selectedProject,

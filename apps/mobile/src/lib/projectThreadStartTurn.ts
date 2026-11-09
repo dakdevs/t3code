@@ -28,6 +28,7 @@ export interface ProjectThreadStartTurnSpec {
   readonly context?: OrchestrationMessageContext;
   readonly uploadedAttachments: ReadonlyArray<UploadedMobileAttachment | ChatAttachment>;
   readonly modelSelection: ModelSelection;
+  readonly skillSelection?: import("@t3tools/contracts").OrchestrationV2ThreadSkillSelection | null;
   readonly runtimeMode: RuntimeMode;
   readonly interactionMode: ProviderInteractionMode;
   readonly workspaceMode: "local" | "worktree";
@@ -68,6 +69,7 @@ export function buildProjectThreadStartTurnInput(spec: ProjectThreadStartTurnSpe
         branch: spec.branch,
         worktreePath: isWorktree ? null : spec.worktreePath,
         createdAt: spec.createdAt,
+        ...(spec.skillSelection === undefined ? {} : { skillSelection: spec.skillSelection }),
       },
       ...(isWorktree
         ? {

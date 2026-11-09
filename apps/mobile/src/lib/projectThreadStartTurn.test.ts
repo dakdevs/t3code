@@ -45,6 +45,7 @@ describe("project thread title", () => {
       titleText: text,
       uploadedAttachments,
       modelSelection: { instanceId: ProviderInstanceId.make("codex"), model: "gpt-5.6-sol" },
+      skillSelection: { instanceId: ProviderInstanceId.make("codex"), names: [] },
       runtimeMode: "full-access",
       interactionMode: "default",
       workspaceMode: "local",
@@ -55,6 +56,7 @@ describe("project thread title", () => {
     } satisfies ProjectThreadStartTurnSpec;
     const input = buildProjectThreadStartTurnInput(spec);
 
+    expect(input.bootstrap.createThread.skillSelection).toEqual({ instanceId: "codex", names: [] });
     expect(input.titleSeed).toBe(title);
     expect(input.bootstrap.createThread.title).toBe(input.titleSeed);
     expect(input.message.attachments).toEqual(uploadedAttachments);

@@ -148,6 +148,9 @@ export function useMultipleModelSend(input: MultipleModelSendInput) {
           clearedDraftSnapshot &&
         appAtomRegistry.get(fanoutSelectionsAtom) === submittedSelections;
       setThreadError(threadId, null);
+      const skillSelection = draftId
+        ? useComposerDraftStore.getState().getDraftSession(draftId)?.skillSelection
+        : undefined;
       const starts = Promise.all(
         targets.map(async (target) => {
           const started = await startFanoutThread({
@@ -186,6 +189,7 @@ export function useMultipleModelSend(input: MultipleModelSendInput) {
                       branch,
                       worktreePath: null,
                       createdAt: createdAt,
+                      ...(skillSelection === undefined ? {} : { skillSelection }),
                     },
                     prepareWorktree: {
                       projectCwd: project.workspaceRoot,

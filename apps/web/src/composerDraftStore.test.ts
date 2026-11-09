@@ -977,6 +977,25 @@ describe("composerDraftStore project draft thread mapping", () => {
     expect(draftByKey(draftId)).toBeUndefined();
   });
 
+  it("retains a draft skill subset through reload and clears it back to project skills", () => {
+    const store = useComposerDraftStore.getState();
+    store.setProjectDraftThreadId(projectRef, draftId, { threadId });
+    store.setDraftThreadContext(draftId, {
+      skillSelection: { instanceId: ProviderInstanceId.make("claudeAgent"), names: [] },
+    });
+    const persisted = partializeComposerDraftStoreState(useComposerDraftStore.getState());
+    const hydrated = useComposerDraftStore.persist.getOptions().merge!(
+      persisted,
+      useComposerDraftStore.getState(),
+    );
+    expect(hydrated.draftThreadsByThreadKey[draftId]?.skillSelection).toEqual({
+      instanceId: "claudeAgent",
+      names: [],
+    });
+    store.setDraftThreadContext(draftId, { skillSelection: null });
+    expect(useComposerDraftStore.getState().getDraftSession(draftId)?.skillSelection).toBeNull();
+  });
+
   it("keeps a draft with an open page when remapping a project to a new draft thread", () => {
     const store = useComposerDraftStore.getState();
     store.setProjectDraftThreadId(projectRef, draftId, { threadId });

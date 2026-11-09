@@ -75,6 +75,7 @@ export interface CreateThreadInput extends CommandMetadata {
   readonly projectId: ProjectId;
   readonly title: string;
   readonly modelSelection: ModelSelection;
+  readonly skillSelection?: OrchestrationV2ThreadSkillSelection | null;
   readonly runtimeMode: RuntimeMode;
   readonly interactionMode: ProviderInteractionMode;
   readonly branch: string | null;
@@ -146,15 +147,12 @@ export interface SetThreadInteractionModeInput extends ThreadCommandInput {
   readonly interactionMode: ProviderInteractionMode;
 }
 
-export interface SetThreadSkillsInput extends ThreadCommandInput {
-  readonly skillSelection: OrchestrationV2ThreadSkillSelection | null;
-}
-
 interface StartThreadBootstrap {
   readonly createThread?: {
     readonly projectId: ProjectId;
     readonly title: string;
     readonly modelSelection: ModelSelection;
+    readonly skillSelection?: OrchestrationV2ThreadSkillSelection | null;
     readonly runtimeMode: RuntimeMode;
     readonly interactionMode: ProviderInteractionMode;
     readonly branch: string | null;
@@ -414,6 +412,7 @@ export const createThread = Effect.fn("EnvironmentCommands.createThread")(functi
     modelSelection: input.modelSelection,
     runtimeMode: input.runtimeMode,
     interactionMode: input.interactionMode,
+    ...(input.skillSelection === undefined ? {} : { skillSelection: input.skillSelection }),
     branch: input.branch,
     worktreePath: input.worktreePath,
   });
@@ -675,7 +674,9 @@ export const setThreadInteractionMode = Effect.fn("EnvironmentCommands.setThread
 );
 
 export const setThreadSkills = Effect.fn("EnvironmentCommands.setThreadSkills")(function* (
-  input: SetThreadSkillsInput,
+  input: ThreadCommandInput & {
+    readonly skillSelection: OrchestrationV2ThreadSkillSelection | null;
+  },
 ) {
   return yield* dispatch({
     type: "thread.skills.set",
@@ -739,6 +740,9 @@ export const startThreadTurn = Effect.fn("EnvironmentCommands.startThreadTurn")(
       runtimeMode: input.runtimeMode,
       interactionMode: input.interactionMode,
       workspaceStrategy,
+      ...(bootstrap?.skillSelection === undefined
+        ? {}
+        : { skillSelection: bootstrap.skillSelection }),
       initialMessage: {
         messageId: input.message.messageId,
         text: input.message.text,

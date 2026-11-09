@@ -58,6 +58,7 @@ describe("filterSettingsSections", () => {
       query: "accounts",
       expected: [["Server settings", ["Provider accounts"]]],
     },
+    { query: "skills", expected: [["Server settings", ["Provider accounts"]]] },
     { query: "usage", expected: [[null, ["Usage"]]] },
     { query: "zzzz", expected: [] },
   ])("$query", ({ query, expected }) => {

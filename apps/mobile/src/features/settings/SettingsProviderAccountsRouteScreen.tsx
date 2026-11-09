@@ -1,3 +1,4 @@
+import { ProjectSkillsSetting } from "./project-skills-setting";
 import * as Dialog from "../../components/ui/Dialog";
 import {
   isAtomCommandInterrupted,
@@ -9,7 +10,10 @@ import {
   isManagedDriverAllowed,
   type ProviderAuthResponse,
   type ServerProvider,
+  type EnvironmentId,
+  type ProviderInstanceId,
 } from "@t3tools/contracts";
+import { usePreventRemove } from "@react-navigation/native";
 import { useAtomValue } from "@effect/atom-react";
 import { useRef, useState } from "react";
 import { Linking, Pressable, ScrollView, TextInput, useWindowDimensions, View } from "react-native";
@@ -37,10 +41,47 @@ import { useSettingsEnvironmentFilter, type SettingsTarget } from "./settings-en
 
 export function SettingsProviderAccountsRouteScreen() {
   const environmentMenu = useSettingsEnvironmentMenu();
-  const { selectedTargets } = useSettingsEnvironmentFilter();
+  const { selectedTargets, selectedProjectKey, projectGroups } = useSettingsEnvironmentFilter();
+  const [skillsTarget, setSkillsTarget] = useState<{
+    environmentId: EnvironmentId;
+    instanceId: ProviderInstanceId;
+  } | null>(null);
+  usePreventRemove(skillsTarget !== null, () => setSkillsTarget(null));
+  const projectMembers =
+    projectGroups
+      .find((group) => group.key === selectedProjectKey)
+      ?.members.map((member) => member.project) ?? [];
   const permittedEnvironments = useEnvironmentsWithScope(selectedTargets, AuthProvidersManageScope);
   const providersByEnvironment = useAtomValue(environmentPresentations.providersByEnvironmentAtom);
   const insets = useSafeAreaInsets();
+  const skillsEnvironment = selectedTargets.find(
+    (target) => target.environmentId === skillsTarget?.environmentId,
+  );
+  const skillsProjects = projectMembers.filter(
+    (project) => project.environmentId === skillsTarget?.environmentId,
+  );
+  const skillsProvider = skillsEnvironment
+    ? managedProviders(skillsEnvironment, providersByEnvironment).find(
+        (provider) => provider.instanceId === skillsTarget?.instanceId,
+      )
+    : undefined;
+  if (
+    skillsTarget &&
+    skillsEnvironment?.serverConfig.environment.capabilities.providerSkillSelection === true &&
+    skillsProjects[0] &&
+    skillsProvider?.supportsSkillSelection === true
+  ) {
+    return (
+      <ProjectSkillsSetting
+        environment={skillsEnvironment}
+        provider={skillsProvider}
+        projectIds={skillsProjects.map((project) => project.id)}
+        instanceId={skillsTarget.instanceId}
+        workspaceRoot={skillsProjects[0].workspaceRoot}
+        onBack={() => setSkillsTarget(null)}
+      />
+    );
+  }
   return (
     <SettingsScreen title="Providers" menus={[environmentMenu]}>
       <ScreenScrollView
@@ -67,6 +108,24 @@ export function SettingsProviderAccountsRouteScreen() {
                   providers={managedProviders(environment, providersByEnvironment)}
                 />
               )}
+              {environment.serverConfig.environment.capabilities.providerSkillSelection === true &&
+              projectMembers.some((project) => project.environmentId === environment.environmentId)
+                ? managedProviders(environment, providersByEnvironment)
+                    .filter((provider) => provider.supportsSkillSelection === true)
+                    .map((provider) => (
+                      <SettingsActionRow
+                        key={`skills-${provider.instanceId}`}
+                        icon="sparkles"
+                        label={`${provider.displayName ?? provider.driver} project skills`}
+                        onPress={() =>
+                          setSkillsTarget({
+                            environmentId: environment.environmentId,
+                            instanceId: provider.instanceId,
+                          })
+                        }
+                      />
+                    ))
+                : null}
             </SettingsSection>
           ))
         )}

@@ -237,6 +237,10 @@ describe("V2 environment commands", () => {
             modelSelection: v2Projection.thread.modelSelection,
             runtimeMode: "full-access",
             interactionMode: "default",
+            skillSelection: {
+              instanceId: v2Projection.thread.modelSelection.instanceId,
+              names: [],
+            },
             branch: "feature",
             worktreePath: "/workspace/project-worktrees/feature",
             createdAt: "2026-06-20T00:00:00.000Z",
@@ -248,6 +252,7 @@ describe("V2 environment commands", () => {
         threadId: v2ThreadId,
         title: "Continue here",
         generateTitle: true,
+        skillSelection: { instanceId: v2Projection.thread.modelSelection.instanceId, names: [] },
         workspaceStrategy: {
           type: "existing_worktree",
           worktreePath: "/workspace/project-worktrees/feature",

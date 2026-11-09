@@ -8,6 +8,7 @@ import {
   defaultInstanceIdForDriver,
   EnvironmentId,
   ModelSelection,
+  OrchestrationV2ThreadSkillSelection,
   ProjectId,
   ProviderInstanceId,
   ProviderInteractionMode,
@@ -305,7 +306,12 @@ type LegacyPersistedComposerDraftStoreState = PersistedComposerDraftStoreState &
   LegacyStickyModelFields &
   LegacyV2StoreFields;
 
+const decodeDraftSkillSelection = Schema.decodeUnknownOption(
+  Schema.NullOr(OrchestrationV2ThreadSkillSelection),
+);
+
 const PersistedDraftThreadState = Schema.Struct({
+  skillSelection: Schema.optionalKey(Schema.NullOr(OrchestrationV2ThreadSkillSelection)),
   threadId: ThreadId,
   environmentId: Schema.String,
   projectId: ProjectId,
@@ -399,6 +405,7 @@ export function composerDraftHasUserContent(
 }
 
 export interface DraftSessionState {
+  skillSelection?: OrchestrationV2ThreadSkillSelection | null;
   threadId: ThreadId;
   environmentId: EnvironmentId;
   projectId: ProjectId;
@@ -463,6 +470,7 @@ interface ComposerDraftStoreState {
       envMode?: DraftThreadEnvMode;
       startFromOrigin?: boolean;
       runtimeMode?: RuntimeMode;
+      skillSelection?: OrchestrationV2ThreadSkillSelection | null;
       interactionMode?: ProviderInteractionMode;
       environmentSelection?: "auto" | "manual";
       loadBalancedEnvironmentId?: EnvironmentId | null;
@@ -479,6 +487,7 @@ interface ComposerDraftStoreState {
       envMode?: DraftThreadEnvMode;
       startFromOrigin?: boolean;
       runtimeMode?: RuntimeMode;
+      skillSelection?: OrchestrationV2ThreadSkillSelection | null;
       interactionMode?: ProviderInteractionMode;
       environmentSelection?: "auto" | "manual";
       loadBalancedEnvironmentId?: EnvironmentId | null;
@@ -494,6 +503,7 @@ interface ComposerDraftStoreState {
       envMode?: DraftThreadEnvMode;
       startFromOrigin?: boolean;
       runtimeMode?: RuntimeMode;
+      skillSelection?: OrchestrationV2ThreadSkillSelection | null;
       interactionMode?: ProviderInteractionMode;
       environmentSelection?: "auto" | "manual";
       loadBalancedEnvironmentId?: EnvironmentId | null;
@@ -1480,6 +1490,7 @@ function createDraftThreadState(
     envMode?: DraftThreadEnvMode;
     startFromOrigin?: boolean;
     runtimeMode?: RuntimeMode;
+    skillSelection?: OrchestrationV2ThreadSkillSelection | null;
     interactionMode?: ProviderInteractionMode;
     environmentSelection?: "auto" | "manual";
     loadBalancedEnvironmentId?: EnvironmentId | null;
@@ -1507,6 +1518,8 @@ function createDraftThreadState(
       : options.startFromOrigin;
   const environmentSelection =
     options?.environmentSelection ?? existingThread?.environmentSelection;
+  const skillSelection =
+    options?.skillSelection === undefined ? existingThread?.skillSelection : options.skillSelection;
   return {
     threadId,
     environmentId: projectRef.environmentId,
@@ -1524,6 +1537,7 @@ function createDraftThreadState(
         : {}),
     createdAt: options?.createdAt ?? existingThread?.createdAt ?? new Date().toISOString(),
     runtimeMode: options?.runtimeMode ?? existingThread?.runtimeMode ?? DEFAULT_RUNTIME_MODE,
+    ...(skillSelection === undefined ? {} : { skillSelection }),
     interactionMode:
       options?.interactionMode ?? existingThread?.interactionMode ?? DEFAULT_INTERACTION_MODE,
     branch: nextBranch,
@@ -1560,6 +1574,7 @@ function draftThreadsEqual(left: DraftThreadState | undefined, right: DraftThrea
     left.loadBalancedEnvironmentId === right.loadBalancedEnvironmentId &&
     left.createdAt === right.createdAt &&
     left.runtimeMode === right.runtimeMode &&
+    left.skillSelection === right.skillSelection &&
     left.interactionMode === right.interactionMode &&
     left.branch === right.branch &&
     left.worktreePath === right.worktreePath &&
@@ -1701,6 +1716,10 @@ function normalizePersistedDraftThreads(
           typeof createdAt === "string" && createdAt.length > 0
             ? createdAt
             : new Date().toISOString(),
+        ...decodeDraftSkillSelection(candidateDraftThread.skillSelection).pipe(
+          Option.map((skillSelection) => ({ skillSelection })),
+          Option.getOrElse(() => ({})),
+        ),
         runtimeMode: isRuntimeMode(candidateDraftThread.runtimeMode)
           ? candidateDraftThread.runtimeMode
           : DEFAULT_RUNTIME_MODE,
@@ -2193,7 +2212,18 @@ export function partializeComposerDraftStoreState(
     if (!keptSessionKeys.has(threadKey)) {
       continue;
     }
-    persistedDraftThreadsByThreadKey[threadKey] = draftThread;
+    const { skillSelection, ...draftFields } = draftThread;
+    persistedDraftThreadsByThreadKey[threadKey] = {
+      ...draftFields,
+      ...(skillSelection === undefined
+        ? {}
+        : {
+            skillSelection:
+              skillSelection === null
+                ? null
+                : { ...skillSelection, names: [...skillSelection.names] },
+          }),
+    };
   }
   return {
     draftsByThreadKey: persistedDraftsByThreadKey,
@@ -2472,6 +2502,9 @@ function toHydratedDraftThreadState(
       ),
     createdAt: persistedDraftThread.createdAt,
     runtimeMode: persistedDraftThread.runtimeMode,
+    ...(persistedDraftThread.skillSelection === undefined
+      ? {}
+      : { skillSelection: persistedDraftThread.skillSelection }),
     interactionMode: persistedDraftThread.interactionMode,
     branch: persistedDraftThread.branch,
     worktreePath: persistedDraftThread.worktreePath,
@@ -2745,6 +2778,10 @@ const composerDraftStore = create<ComposerDraftStoreState>()(
               (options.branch != null || options.worktreePath != null
                 ? "manual"
                 : existing.environmentSelection);
+            const skillSelection =
+              options.skillSelection === undefined
+                ? existing.skillSelection
+                : options.skillSelection;
             const nextDraftThread: DraftThreadState = {
               threadId: existing.threadId,
               environmentId: nextProjectRef.environmentId,
@@ -2762,6 +2799,7 @@ const composerDraftStore = create<ComposerDraftStoreState>()(
                   ? existing.createdAt
                   : options.createdAt || existing.createdAt,
               runtimeMode: options.runtimeMode ?? existing.runtimeMode,
+              ...(skillSelection === undefined ? {} : { skillSelection }),
               interactionMode: options.interactionMode ?? existing.interactionMode,
               branch: nextBranch,
               worktreePath: nextWorktreePath,
@@ -2778,6 +2816,7 @@ const composerDraftStore = create<ComposerDraftStoreState>()(
               nextDraftThread.loadBalancedEnvironmentId === existing.loadBalancedEnvironmentId &&
               nextDraftThread.createdAt === existing.createdAt &&
               nextDraftThread.runtimeMode === existing.runtimeMode &&
+              nextDraftThread.skillSelection === existing.skillSelection &&
               nextDraftThread.interactionMode === existing.interactionMode &&
               nextDraftThread.branch === existing.branch &&
               nextDraftThread.worktreePath === existing.worktreePath &&

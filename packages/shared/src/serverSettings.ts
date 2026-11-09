@@ -266,7 +266,7 @@ function pickOverrideKeys(entry: ProjectSettingsOverrides | undefined, known: bo
   );
 }
 
-// Older clients omit providerInstances during whole-entry replacement; preserve it to avoid wiping overrides.
+// Older clients omit per-instance maps during whole-entry replacement; preserve them to avoid wiping overrides.
 function mergeProjectSettingsOverridesPatch(
   current: Readonly<Record<string, ProjectSettingsOverrides>>,
   patch: Readonly<Record<string, ProjectSettingsOverrides | null>>,
@@ -277,14 +277,17 @@ function mergeProjectSettingsOverridesPatch(
       next.delete(projectId);
       continue;
     }
-    const storedProviderInstances = current[projectId]?.providerInstances;
+    const stored = current[projectId];
     next.set(projectId, {
       // Preserve downgraded storage, but reject new unknown writes so clients can detect unsupported settings.
-      ...pickOverrideKeys(current[projectId], false),
+      ...pickOverrideKeys(stored, false),
       ...pickOverrideKeys(entry, true),
-      ...(Object.hasOwn(entry, "providerInstances") || storedProviderInstances === undefined
+      ...(Object.hasOwn(entry, "providerInstances") || stored?.providerInstances === undefined
         ? {}
-        : { providerInstances: storedProviderInstances }),
+        : { providerInstances: stored.providerInstances }),
+      ...(Object.hasOwn(entry, "providerSkills") || stored?.providerSkills === undefined
+        ? {}
+        : { providerSkills: stored.providerSkills }),
     });
   }
   return Object.fromEntries(next);

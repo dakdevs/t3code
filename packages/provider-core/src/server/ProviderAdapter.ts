@@ -25,6 +25,7 @@ import {
   PositiveInt,
   ProviderUserInputAnswers,
   ProviderSessionId,
+  ProviderSkillNames,
   ProviderThreadId,
   ProviderTurnId,
   RuntimeMode,
@@ -56,6 +57,8 @@ export const ProviderAdapterV2RuntimePolicy = Schema.Struct({
    * it; adapters use it to refuse native mode choices a user makes beside T3 Code's own.
    */
   maxRuntimeMode: Schema.optional(RuntimeMode),
+  /** Exact skill names the main session may use; absent keeps the provider's default. */
+  skills: Schema.optional(ProviderSkillNames),
 });
 export type ProviderAdapterV2RuntimePolicy = typeof ProviderAdapterV2RuntimePolicy.Type;
 

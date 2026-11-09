@@ -119,6 +119,7 @@ import {
   SettingsSection,
   useSettingsSearchTargetId,
 } from "./settingsLayout";
+import { ProjectSkillsSetting } from "./project-skills-setting";
 import {
   buildProviderEnvironmentOptions,
   buildProviderInstanceOverridePatch,
@@ -948,6 +949,7 @@ export function EnvironmentProviderSettings({
         liveProvider={serverProviders.find((candidate) => candidate.instanceId === row.instanceId)}
         isUpdateDispatching={updatingProviderInstanceIds.has(row.instanceId)}
         showProjectOverride={showProjectOverride}
+        projectIds={projectIds}
         projectOverrideValue={
           showProjectOverride
             ? settings.projectSettingsOverrides[representativeProjectId]?.providerInstances?.[
@@ -1236,6 +1238,7 @@ function ProviderInstanceRow({
   showProjectOverride,
   projectOverrideValue,
   projectOverrideEffectiveEnabled,
+  projectIds,
   modelPreferences,
   favorites,
   actions,
@@ -1256,6 +1259,7 @@ function ProviderInstanceRow({
   readonly showProjectOverride: boolean;
   readonly projectOverrideValue: boolean | undefined;
   readonly projectOverrideEffectiveEnabled: boolean;
+  readonly projectIds: readonly ProjectId[];
   readonly modelPreferences:
     | { readonly hiddenModels: ReadonlyArray<string>; readonly modelOrder: ReadonlyArray<string> }
     | undefined;
@@ -1268,6 +1272,9 @@ function ProviderInstanceRow({
     mode === "editor" && liveProvider?.driver === "acpRegistry"
       ? allProjects.filter((project) => project.environmentId === environmentId)
       : undefined;
+  const skillsWorkspaceRoot = allProjects.find(
+    (project) => project.environmentId === environmentId && project.id === projectIds[0],
+  )?.workspaceRoot;
   const instance = explicitInstance ?? { driver };
   const driverOption = providerClients.get(driver);
   const updateCandidate =
@@ -1305,6 +1312,21 @@ function ProviderInstanceRow({
       secretSources={secretSources}
       acpProjects={acpProjects}
       projectOverride={projectOverride}
+      skills={
+        mode === "editor" &&
+        showProjectOverride &&
+        liveProvider?.supportsSkillSelection === true &&
+        skillsWorkspaceRoot !== undefined ? (
+          <ProjectSkillsSetting
+            environmentId={environmentId}
+            instanceId={instanceId}
+            provider={liveProvider}
+            projectIds={projectIds}
+            workspaceRoot={skillsWorkspaceRoot}
+            canWrite={canWriteSettings}
+          />
+        ) : undefined
+      }
       onAcceptUrlAuth={
         readOnly ? undefined : (action) => actions.acceptUrlAuthentication(instanceId, action)
       }

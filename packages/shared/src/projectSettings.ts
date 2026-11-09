@@ -1,11 +1,14 @@
 import {
   type ModelSelection,
+  type OrchestrationV2ThreadSkillSelection,
   PROJECT_FILE_BACKED_SETTINGS,
   PROJECT_SCOPED_SERVER_SETTING_KEYS,
   type ProjectFileBackedSettingKey,
   type ProjectId,
   type ProjectScopedServerSettingKey,
   type ProjectSettingsOverrides,
+  type ProviderInstanceId,
+  type ProviderSkillNames,
   resolveProjectProviderInstanceEnabled,
   resolveTextGenerationSelectionEnabled,
   type ResolvedServerSettings,
@@ -164,6 +167,28 @@ function resolveProjectOverrides(
     if (fallback !== null) effective.textGenerationModelSelection = fallback;
   }
   return { settings: effective as ServerSettings, sources, overrides };
+}
+
+/**
+ * Skills an agent on `instanceId` is offered; undefined keeps the provider's default.
+ * A thread narrows its project's list, and a selection made for another instance is ignored.
+ */
+export function resolveEffectiveProviderSkills(input: {
+  readonly settings: Pick<ServerSettings, "projectSettingsOverrides">;
+  readonly projectId: ProjectId;
+  readonly instanceId: ProviderInstanceId;
+  readonly threadSelection: OrchestrationV2ThreadSkillSelection | null | undefined;
+}): ProviderSkillNames | undefined {
+  const projectSkills =
+    input.settings.projectSettingsOverrides[input.projectId]?.providerSkills?.[input.instanceId];
+  const threadSkills =
+    input.threadSelection?.instanceId === input.instanceId
+      ? input.threadSelection.names
+      : undefined;
+  if (threadSkills === undefined) return projectSkills;
+  if (projectSkills === undefined) return threadSkills;
+  const allowed = new Set(projectSkills);
+  return threadSkills.filter((name) => allowed.has(name));
 }
 
 /** New name-only projects use their checkout until the first thread, even when the default is worktree. */

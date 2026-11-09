@@ -587,6 +587,7 @@ function commandThreadId(command: OrchestrationV2ServerCommand): ThreadId {
     case "thread.project.adopt-folder":
     case "thread.runtime-mode.set":
     case "thread.interaction-mode.set":
+    case "thread.skills.set":
     case "thread.model-selection.set":
     case "provider-session.detach":
     case "message.dispatch":
@@ -3355,6 +3356,7 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
           | "thread.title.regeneration.complete"
           | "thread.runtime-mode.set"
           | "thread.interaction-mode.set"
+          | "thread.skills.set"
           | "thread.model-selection.set"
           | "provider.switch";
       }
@@ -4226,6 +4228,8 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
           return { ...thread, runtimeMode: command.runtimeMode, updatedAt: now };
         case "thread.interaction-mode.set":
           return { ...thread, interactionMode: command.interactionMode, updatedAt: now };
+        case "thread.skills.set":
+          return { ...thread, skillSelection: command.skillSelection, updatedAt: now };
         case "thread.model-selection.set":
         case "provider.switch":
           return {
@@ -4287,6 +4291,8 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
           return "thread.marked-unread" as const;
         case "thread.metadata.update":
         case "thread.title.regeneration.complete":
+        // A dedicated event type would break clients and downgraded servers that replay this stream.
+        case "thread.skills.set":
           return "thread.metadata-updated" as const;
         case "thread.pull-request.link":
         case "thread.pull-request.unlink":
@@ -13557,6 +13563,7 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
       case "thread.title.regeneration.complete":
       case "thread.runtime-mode.set":
       case "thread.interaction-mode.set":
+      case "thread.skills.set":
       case "thread.model-selection.set":
       case "provider.switch":
         yield* dispatchThreadMutation(command, events, effects);

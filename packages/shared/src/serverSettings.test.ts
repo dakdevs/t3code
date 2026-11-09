@@ -553,7 +553,7 @@ describe("serverSettings helpers", () => {
     });
   });
 
-  it("keeps a project's providerInstances override when a patch entry omits the key", () => {
+  it("keeps a project's per-instance overrides when a patch entry omits their keys", () => {
     const instanceId = ProviderInstanceId.make("codex_work");
     const projectId = ProjectId.make("project-a");
     const current = {
@@ -562,6 +562,7 @@ describe("serverSettings helpers", () => {
         [projectId]: {
           newWorktreesStartFromOrigin: true,
           providerInstances: { [instanceId]: { enabled: false } },
+          providerSkills: { [instanceId]: ["review"] },
         },
       },
     };
@@ -575,7 +576,13 @@ describe("serverSettings helpers", () => {
     expect(patched.projectSettingsOverrides[projectId]).toEqual({
       newWorktreesStartFromOrigin: false,
       providerInstances: { [instanceId]: { enabled: false } },
+      providerSkills: { [instanceId]: ["review"] },
     });
+    expect(
+      applyServerSettingsPatch(patched, {
+        projectSettingsOverrides: { [projectId]: { providerSkills: {} } },
+      }).projectSettingsOverrides[projectId]?.providerSkills,
+    ).toEqual({});
   });
 
   // regression: #18334 a newer client must still see this server drop a key it does not know

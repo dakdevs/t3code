@@ -78,9 +78,12 @@ const providerInstanceFor = (instanceId: ProviderInstanceId) =>
     },
   }) as ProviderInstance;
 
-const layerWithPolicy = (policy?: ManagedPolicySummary) =>
+const layerWithPolicy = (
+  policy?: ManagedPolicySummary,
+  settings: Parameters<typeof ServerSettings.layerTest>[0] = {},
+) =>
   RuntimePolicy.layerFromProjectStore.pipe(
-    Layer.provide(ServerSettings.layerTest({}, policy)),
+    Layer.provide(ServerSettings.layerTest(settings, policy)),
     Layer.provide(
       Layer.succeed(ProviderInstanceRegistry.ProviderInstanceRegistry, {
         getInstance: (instanceId) => Effect.succeed(providerInstanceFor(instanceId)),
@@ -184,6 +187,41 @@ it.layer(
       const allowed = yield* resolve("auto-accept-edits");
       assert.equal(allowed.runtimeMode, "auto-accept-edits");
       assert.equal(allowed.maxRuntimeMode, "auto-accept-edits");
+    }),
+  );
+});
+
+it.layer(
+  layerWithPolicy(undefined, {
+    projectSettingsOverrides: {
+      [projectId]: { providerSkills: { [providerInstanceId]: ["review", "pdf"] } },
+    },
+  }),
+)("RuntimePolicyV2 with project skills", (it) => {
+  it.effect("offers the project's skills, narrowed by the thread's own selection", () =>
+    Effect.gen(function* () {
+      const policy = yield* RuntimePolicy.RuntimePolicyV2;
+      const now = yield* DateTime.now;
+      const skillsFor = (
+        skillSelection: OrchestrationV2AppThread["skillSelection"],
+        instanceId: ProviderInstanceId = providerInstanceId,
+      ) =>
+        policy
+          .resolve({
+            thread: { ...makeThread({ now, worktreePath: null }), skillSelection },
+            modelSelection: { instanceId, model: "test-model" },
+          })
+          .pipe(Effect.map((resolved) => resolved.skills));
+
+      assert.deepStrictEqual(yield* skillsFor(undefined), ["review", "pdf"]);
+      assert.deepStrictEqual(
+        yield* skillsFor({ instanceId: providerInstanceId, names: ["pdf", "docx"] }),
+        ["pdf"],
+      );
+      assert.strictEqual(
+        yield* skillsFor({ instanceId: providerInstanceId, names: ["pdf"] }, grokInstanceId),
+        undefined,
+      );
     }),
   );
 });

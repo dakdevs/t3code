@@ -51,6 +51,45 @@ export function getProviderSkillsForSlashMenu(
     : [];
 }
 
+export interface ProviderSkillChoice {
+  readonly name: string;
+  readonly description?: string;
+}
+
+/**
+ * Rows for a skill allowlist picker and which are on. `offered` limits the rows to a parent list
+ * (a project's, for a thread); `selected` undefined turns every row on. Listed names missing from
+ * the catalog stay as rows so they can be removed. User-only skills are never offered to agents.
+ */
+export function resolveProviderSkillChoices(input: {
+  readonly catalog: ReadonlyArray<ServerProviderSkill>;
+  readonly offered: ReadonlyArray<string> | undefined;
+  readonly selected: ReadonlyArray<string> | undefined;
+}): {
+  readonly choices: ReadonlyArray<ProviderSkillChoice>;
+  readonly selected: ReadonlySet<string>;
+} {
+  const descriptions = new Map<string, string | undefined>();
+  for (const skill of input.catalog) {
+    if (!skill.enabled || skill.userInvocationOnly === true || descriptions.has(skill.name)) {
+      continue;
+    }
+    descriptions.set(skill.name, skill.shortDescription ?? skill.description);
+  }
+  const names = new Set(input.offered ?? descriptions.keys());
+  if (input.offered === undefined) for (const name of input.selected ?? []) names.add(name);
+  const choices = [...names]
+    .sort((left, right) => left.localeCompare(right))
+    .map((name) => {
+      const description = descriptions.get(name);
+      return description === undefined ? { name } : { name, description };
+    });
+  return {
+    choices,
+    selected: new Set(input.selected?.filter((name) => names.has(name)) ?? names),
+  };
+}
+
 export function getProviderSlashCommandsForSlashMenu(
   slashCommands: ReadonlyArray<ServerProviderSlashCommand>,
   visibleSkills: ReadonlyArray<ServerProviderSkill>,

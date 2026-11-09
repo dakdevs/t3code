@@ -9,6 +9,7 @@ import { createModelSelection } from "./model.ts";
 import {
   clearProjectSettingsOverrides,
   hasProjectSettingsOverrides,
+  resolveEffectiveProviderSkills,
   resolveNewThreadEnvMode,
   resolveProjectSettings,
   resolveSendEnvMode,
@@ -204,6 +205,50 @@ describe("resolveProjectSettings with a t3.json", () => {
       resolveProjectSettings(DEFAULT_SERVER_SETTINGS, projectId, null, {}).sources
         .defaultThreadEnvMode,
     ).toBe("environment");
+  });
+});
+
+describe("resolveEffectiveProviderSkills", () => {
+  const claude = ProviderInstanceId.make("claudeAgent");
+  const claudeWork = ProviderInstanceId.make("claude_work");
+  const projectSkills = (names: ReadonlyArray<string> | undefined) => ({
+    ...DEFAULT_SERVER_SETTINGS,
+    projectSettingsOverrides:
+      names === undefined ? {} : { [projectId]: { providerSkills: { [claude]: names } } },
+  });
+
+  it.each([
+    ["provider default without any selection", undefined, undefined, undefined],
+    ["the project list", ["review", "pdf"], undefined, ["review", "pdf"]],
+    ["no skills when the project offers none", [], undefined, []],
+    ["the thread list under the provider default", undefined, ["pdf"], ["pdf"]],
+    ["the thread list narrowed to the project's", ["review"], ["review", "pdf"], ["review"]],
+    ["no skills when the thread chose none", ["review"], [], []],
+  ] as const)("gives %s", (_case, project, thread, expected) => {
+    expect(
+      resolveEffectiveProviderSkills({
+        settings: projectSkills(project),
+        projectId,
+        instanceId: claude,
+        threadSelection: thread === undefined ? null : { instanceId: claude, names: thread },
+      }),
+    ).toEqual(expected);
+  });
+
+  it("ignores a thread selection made for another instance and other projects' lists", () => {
+    const settings = projectSkills(["review"]);
+    const threadSelection = { instanceId: claudeWork, names: ["pdf"] };
+    expect(
+      resolveEffectiveProviderSkills({ settings, projectId, instanceId: claude, threadSelection }),
+    ).toEqual(["review"]);
+    expect(
+      resolveEffectiveProviderSkills({
+        settings,
+        projectId: otherProjectId,
+        instanceId: claude,
+        threadSelection,
+      }),
+    ).toBeUndefined();
   });
 });
 

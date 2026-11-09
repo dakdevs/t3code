@@ -21,7 +21,12 @@ import type {
   ServerSettings,
   ThreadId,
 } from "@t3tools/contracts";
-import type { LegendListRenderItemProps } from "@legendapp/list/react-native";
+import { LegendList, type LegendListRenderItemProps } from "@legendapp/list/react-native";
+import {
+  type ProviderSkillChoice,
+  resolveProviderSkillChoices,
+  resolveProviderSkillsForCwd,
+} from "@t3tools/client-runtime/providerSkills";
 import { RegistryContext, useAtomValue } from "@effect/atom-react";
 import { AnimatedLegendList } from "@legendapp/list/reanimated";
 import {
@@ -92,6 +97,7 @@ import { selectThreadModel } from "../../state/thread-model-selection";
 import { useThreadSelection } from "../../state/use-thread-selection";
 import { threadAllowsProviderSwitch } from "../../state/thread-provider-switching";
 import { environmentServerConfigsAtom, serverEnvironment } from "../../state/server";
+import { threadEnvironment } from "../../state/threads";
 import { mobilePreferencesAtom } from "../../state/preferences";
 import { useAtomCommand } from "../../state/use-atom-command";
 import { useNewTaskFlow } from "./new-task-flow-provider";
@@ -253,7 +259,17 @@ function SwitchRow(props: {
 
 type ThreadSettingsSubmenuPage =
   | { readonly kind: "descriptor"; readonly id: string }
-  | { readonly kind: "runtime" };
+  | { readonly kind: "runtime" }
+  | { readonly kind: "skills" };
+
+/** An existing thread's narrowing of its project's skills; dispatched as soon as it changes. */
+type ThreadSettingsSkills = {
+  readonly label: string;
+  readonly choices: ReadonlyArray<ProviderSkillChoice>;
+  readonly selected: ReadonlySet<string>;
+  readonly overridden: boolean;
+  readonly onChange: (names: ReadonlyArray<string> | null) => void;
+};
 
 type ThreadSettingsSessionProps = {
   readonly environmentId: EnvironmentId | null;
@@ -271,6 +287,7 @@ type ThreadSettingsSessionProps = {
   readonly onUpdateOptionSelections: (selections: ReadonlyArray<ProviderOptionSelection>) => void;
   readonly runtimeMode: RuntimeMode;
   readonly onUpdateRuntimeMode: (mode: RuntimeMode) => void;
+  readonly skills?: ThreadSettingsSkills;
 };
 
 /** The composer draft the sheet edits: the thread's own, or a queued message being edited. */
@@ -294,6 +311,7 @@ type ThreadSettingsSessionValue = {
   readonly runtimeMode: RuntimeMode;
   readonly runtimeModeChoices: ReadonlyArray<RuntimeModeChoice>;
   readonly onUpdateRuntimeMode: (mode: RuntimeMode) => void;
+  readonly skills: ThreadSettingsSkills | undefined;
   readonly displayedDescriptors: ReadonlyArray<ProviderOptionDescriptor>;
   readonly promptTraits: ReturnType<typeof getPromptControlledTraits>;
   readonly displayedModelSelection: ModelSelection | null;
@@ -603,6 +621,7 @@ function ThreadSettingsSessionProvider(
     runtimeMode: compatibleRuntimeMode,
     runtimeModeChoices,
     onUpdateRuntimeMode: props.onUpdateRuntimeMode,
+    skills: props.skills,
     displayedDescriptors,
     promptTraits,
     displayedModelSelection: pendingModel?.selection ?? props.selectedModel,
@@ -878,6 +897,15 @@ function ThreadSettingsOptionsItem(props: {
             </Animated.View>
           );
         })}
+        {session.skills ? (
+          <Animated.View layout={THREAD_SETTINGS_OPTIONS_LAYOUT_TRANSITION}>
+            <DisclosureRow
+              label="Skills"
+              value={session.skills.label}
+              onPress={() => props.onOpenSubmenu({ kind: "skills" })}
+            />
+          </Animated.View>
+        ) : null}
         <Animated.View layout={THREAD_SETTINGS_OPTIONS_LAYOUT_TRANSITION}>
           <DisclosureRow
             isLast
@@ -1140,6 +1168,7 @@ function ThreadSettingsChoiceContent(props: {
 type ThreadSettingsPickerStackParams = {
   ThreadSettingsModels: undefined;
   ThreadSettingsChoice: ThreadSettingsSubmenuPage & { readonly title: string };
+  ThreadSettingsSkills: undefined;
 };
 
 type ThreadSettingsPickerPresentation = {
@@ -1241,6 +1270,10 @@ function ThreadSettingsModelsScreen() {
         <ThreadSettingsMainContent
           bottomInset={searchToolbarInset}
           onOpenSubmenu={(submenu) => {
+            if (submenu.kind === "skills") {
+              navigation.navigate("ThreadSettingsSkills");
+              return;
+            }
             const title =
               submenu.kind === "runtime"
                 ? "Runtime"
@@ -1272,6 +1305,119 @@ function ThreadSettingsChoiceScreen() {
   );
 }
 
+function ThreadSettingsSkillsScreen() {
+  const navigation = useNavigation<NativeStackNavigationProp<ThreadSettingsPickerStackParams>>();
+  const insets = useSafeAreaInsets();
+  const skills = useThreadSettingsSession().skills;
+  const [query, setQuery] = useState("");
+  const search: AppBarSearch = {
+    value: query,
+    onChangeText: setQuery,
+    placeholder: "Find a skill",
+    clearAccessibilityLabel: "Clear skill search",
+    mode: "inline",
+    compactToolbar: true,
+  };
+  const searchToolbarInset = useSearchToolbarInset(search);
+  if (!skills) return <View className="flex-1 bg-sheet" />;
+
+  const trimmedQuery = query.trim().toLowerCase();
+  const rows = skills.choices.filter(
+    (choice) =>
+      trimmedQuery.length === 0 ||
+      choice.name.toLowerCase().includes(trimmedQuery) ||
+      choice.description?.toLowerCase().includes(trimmedQuery) === true,
+  );
+  const toggle = (name: string, on: boolean) => {
+    void Haptics.selectionAsync();
+    skills.onChange(
+      skills.choices
+        .map((choice) => choice.name)
+        .filter((candidate) => (candidate === name ? on : skills.selected.has(candidate))),
+    );
+  };
+  const actions = [
+    {
+      id: "all",
+      label: "Turn all on",
+      onPress: () => skills.onChange(skills.choices.map((c) => c.name)),
+    },
+    { id: "none", label: "Turn all off", onPress: () => skills.onChange([]) },
+    ...(skills.overridden
+      ? [{ id: "inherit", label: "Use project skills", onPress: () => skills.onChange(null) }]
+      : []),
+  ];
+
+  return (
+    <>
+      <AppBar title="Skills" onBack={() => navigation.goBack()} search={search} hideBottomBorder />
+      <ScreenContent>
+        {/* oxlint-disable-next-line t3code/require-registered-list-scroll -- Sheet content; sheets sit outside workspace columns and keep their own header handling. */}
+        <LegendList
+          className="flex-1 bg-sheet"
+          contentContainerStyle={{
+            paddingTop: 12,
+            paddingBottom: insets.bottom + searchToolbarInset + 12,
+          }}
+          contentInsetAdjustmentBehavior="automatic"
+          data={rows}
+          estimatedItemSize={48}
+          keyExtractor={(choice) => choice.name}
+          keyboardDismissMode="on-drag"
+          keyboardShouldPersistTaps="handled"
+          recycleItems
+          ListHeaderComponent={
+            <View className="gap-2 pb-5">
+              <Text className="px-5 text-sm text-foreground-muted">
+                The next message uses these skills. You can still run any skill yourself by typing
+                its command.
+              </Text>
+              <View className="mx-4 overflow-hidden rounded-2xl bg-grouped-card">
+                {actions.map((action, index) => (
+                  <Pressable
+                    key={action.id}
+                    accessibilityRole="button"
+                    onPress={action.onPress}
+                    className={cn(
+                      "min-h-11 justify-center px-4 py-2 active:bg-subtle android:min-h-14",
+                      index < actions.length - 1 && "border-b border-border-subtle",
+                    )}
+                  >
+                    <Text className="text-sm font-t3-medium text-primary-text">{action.label}</Text>
+                  </Pressable>
+                ))}
+              </View>
+            </View>
+          }
+          ListEmptyComponent={
+            <Text className="px-8 py-10 text-center text-sm text-foreground-muted">
+              {skills.choices.length === 0
+                ? "No skills found for this project"
+                : "No matching skills"}
+            </Text>
+          }
+          renderItem={({ item, index }) => (
+            <View
+              className={cn(
+                "mx-4 overflow-hidden bg-grouped-card",
+                index === 0 && "rounded-t-2xl",
+                index === rows.length - 1 && "rounded-b-2xl",
+              )}
+            >
+              <SwitchRow
+                label={item.name}
+                value={skills.selected.has(item.name)}
+                onValueChange={(on) => toggle(item.name, on)}
+                isLast={index === rows.length - 1}
+              />
+            </View>
+          )}
+        />
+      </ScreenContent>
+    </>
+  );
+}
+
 function ThreadSettingsPickerNavigator(props: ThreadSettingsPickerPresentation) {
   const screenOptions = useSheetStackOptions();
   const presentation = {
@@ -1294,6 +1440,11 @@ function ThreadSettingsPickerNavigator(props: ThreadSettingsPickerPresentation) 
           component={ThreadSettingsChoiceScreen}
           options={({ route }) => ({ title: route.params.title })}
         />
+        <ThreadSettingsPickerStack.Screen
+          name="ThreadSettingsSkills"
+          component={ThreadSettingsSkillsScreen}
+          options={{ title: "Skills" }}
+        />
       </ThreadSettingsPickerStack.Navigator>
     </ThreadSettingsPickerPresentationContext.Provider>
   );
@@ -1314,8 +1465,12 @@ export function ExistingThreadSettingsRouteScreen({
 }: StaticScreenProps<ExistingThreadSettingsRouteParams>) {
   const navigation = useNavigation<NativeStackNavigationProp<Record<string, object | undefined>>>();
   // Reads the same environmentId/threadId params as the Thread route beneath it.
-  const { selectedThread, selectedThreadDetailRef, selectedEnvironmentRuntime } =
-    useThreadSelection();
+  const {
+    selectedThread,
+    selectedThreadDetailRef,
+    selectedThreadProject,
+    selectedEnvironmentRuntime,
+  } = useThreadSelection();
   // Streamed text would otherwise re-render the whole model picker on every delta.
   const structure = useQuietThreadStructure(selectedThreadDetailRef);
   const reportedModelSelection = useThreadReportedModelSelection(selectedThreadDetailRef);
@@ -1325,6 +1480,7 @@ export function ExistingThreadSettingsRouteScreen({
   // A queued edit can end while the sheet is open; the prompt then belongs to the thread's draft.
   const draftKey = activeComposerDraftKey(threadKey, route.params.draftKey, queuedRunEdit);
   const prompt = useComposerDraft(draftKey).text;
+  const setThreadSkills = useAtomCommand(threadEnvironment.setSkills, "thread skills update");
 
   if (!selectedThread) {
     return <View className="flex-1 bg-sheet" />;
@@ -1352,6 +1508,51 @@ export function ExistingThreadSettingsRouteScreen({
     ) ?? null;
   const updateModelSelection = (selection: ModelSelection) =>
     selectThreadModel(route.params, selection);
+  const skillsProvider = serverConfig?.providers.find(
+    (provider) => provider.instanceId === modelSelection.instanceId,
+  );
+  const skillsCwd = selectedThread.worktreePath ?? selectedThreadProject?.workspaceRoot ?? null;
+  const projectSkills =
+    serverConfig?.settings.projectSettingsOverrides[selectedThread.projectId]?.providerSkills?.[
+      modelSelection.instanceId
+    ];
+  const threadSkillSelection =
+    selectedThread.skillSelection?.instanceId === modelSelection.instanceId
+      ? selectedThread.skillSelection
+      : null;
+  const skillChoices =
+    skillsProvider === undefined
+      ? null
+      : resolveProviderSkillChoices({
+          catalog: resolveProviderSkillsForCwd(skillsProvider, skillsCwd),
+          offered: projectSkills,
+          selected: threadSkillSelection?.names,
+        });
+  // Older servers ignore skill selections, and only some providers honor them.
+  const skills =
+    serverConfig?.environment.capabilities.providerSkillSelection === true &&
+    skillsProvider?.supportsSkillSelection === true &&
+    skillChoices !== null
+      ? {
+          ...skillChoices,
+          label:
+            skillChoices.choices.length === 0
+              ? "None found"
+              : skillChoices.selected.size === skillChoices.choices.length
+                ? "All"
+                : `${skillChoices.selected.size} of ${skillChoices.choices.length}`,
+          overridden: threadSkillSelection !== null,
+          onChange: (names: ReadonlyArray<string> | null) =>
+            void setThreadSkills({
+              environmentId: selectedThread.environmentId,
+              input: {
+                threadId: selectedThread.id,
+                skillSelection:
+                  names === null ? null : { instanceId: modelSelection.instanceId, names },
+              },
+            }),
+        }
+      : undefined;
 
   return (
     <ThreadSettingsPickerScreen
@@ -1376,6 +1577,7 @@ export function ExistingThreadSettingsRouteScreen({
       }}
       runtimeMode={draftSettings.runtimeMode ?? selectedThread.runtimeMode}
       onUpdateRuntimeMode={(runtimeMode) => updateComposerDraftSettings(threadKey, { runtimeMode })}
+      {...(skills === undefined ? {} : { skills })}
       onClose={() => navigation.goBack()}
     />
   );

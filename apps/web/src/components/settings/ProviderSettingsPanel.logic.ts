@@ -108,6 +108,29 @@ export function buildProviderInstanceOverridePatch(
   return patch;
 }
 
+/** Undefined restores the provider's default skills; providerSkills is always sent, as above. */
+export function buildProviderSkillsOverridePatch(
+  settings: Pick<ServerSettings, "projectSettingsOverrides">,
+  projectIds: readonly ProjectId[],
+  instanceId: ProviderInstanceId,
+  names: ReadonlyArray<string> | undefined,
+): Record<ProjectId, ProjectSettingsOverrides | null> {
+  const patch: Record<ProjectId, ProjectSettingsOverrides | null> = {};
+  for (const projectId of projectIds) {
+    const current = settings.projectSettingsOverrides[projectId];
+    const skills = { ...current?.providerSkills };
+    if (names === undefined) delete skills[instanceId];
+    else skills[instanceId] = names;
+
+    const { providerSkills: _omit, ...rest } = current ?? {};
+    patch[projectId] =
+      Object.keys(rest).length === 0 && Object.keys(skills).length === 0
+        ? null
+        : { ...rest, providerSkills: skills };
+  }
+  return patch;
+}
+
 export function classifyProviderEnvironmentAccess(input: {
   readonly connectionPhase: EnvironmentConnectionPhase;
   readonly hasServerConfig: boolean;

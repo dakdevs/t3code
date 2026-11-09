@@ -257,6 +257,7 @@ import { useComposerRestingTransition } from "./useComposerRestingTransition";
 import { ComposerCommandMenuLayer } from "./ComposerCommandMenuLayer";
 import { useRestingComposerControlsLayout } from "./useRestingComposerControlsLayout";
 import { useProviderWorkspaceSnapshotRefresh } from "./useProviderWorkspaceSnapshotRefresh";
+import { ThreadSkillsControl } from "./thread-skills-control";
 import { useComposerProviderModel } from "./useComposerProviderModel";
 import { useComposerImageGroups } from "./useComposerImageGroups";
 import { useComposerStash } from "./useComposerStash";
@@ -2430,6 +2431,19 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
       onModelPickerOpenChange={setIsComposerModelPickerOpen}
       modelPickerIconClassName={composerProviderState.modelPickerIconClassName}
       getModelDisabledReason={getModelDisabledReason}
+      skillsControl={
+        routeKind === "server" &&
+        activeThread !== undefined &&
+        selectedProviderStatus?.supportsSkillSelection === true ? (
+          <ThreadSkillsControl
+            environmentId={environmentId}
+            thread={activeThread}
+            instanceId={selectedInstanceId}
+            catalog={selectedProviderSkills}
+            scanning={workspaceSkillsScanning}
+          />
+        ) : undefined
+      }
     />
   );
   // An open question owns the space above the composer. Only a machine problem,

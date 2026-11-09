@@ -13,6 +13,7 @@ import {
   type NodeId,
   type OrchestrationV2Command,
   type OrchestrationV2CreationSource,
+  type OrchestrationV2ThreadSkillSelection,
   type PlanId,
   type ProjectId,
   type ProjectIconOverride,
@@ -143,6 +144,10 @@ export interface SetThreadRuntimeModeInput extends ThreadCommandInput {
 
 export interface SetThreadInteractionModeInput extends ThreadCommandInput {
   readonly interactionMode: ProviderInteractionMode;
+}
+
+export interface SetThreadSkillsInput extends ThreadCommandInput {
+  readonly skillSelection: OrchestrationV2ThreadSkillSelection | null;
 }
 
 interface StartThreadBootstrap {
@@ -668,6 +673,17 @@ export const setThreadInteractionMode = Effect.fn("EnvironmentCommands.setThread
     });
   },
 );
+
+export const setThreadSkills = Effect.fn("EnvironmentCommands.setThreadSkills")(function* (
+  input: SetThreadSkillsInput,
+) {
+  return yield* dispatch({
+    type: "thread.skills.set",
+    commandId: yield* allocateCommandId(input),
+    threadId: input.threadId,
+    skillSelection: input.skillSelection,
+  });
+});
 
 export const startThreadTurn = Effect.fn("EnvironmentCommands.startThreadTurn")(function* (
   input: StartThreadTurnInput,

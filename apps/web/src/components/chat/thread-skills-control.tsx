@@ -10,16 +10,20 @@ import { threadEnvironment } from "../../state/threads";
 import { useOrchestrationCommand } from "../../state/use-orchestration-command";
 import type { Thread } from "../../types";
 import { describeSkillAllowlist, SkillAllowlistPicker } from "../skill-allowlist-picker";
+import { useSkillSelectionSave } from "../use-skill-selection-save";
 import { composerFloatingLayerProps } from "./composerEventScope";
 
 /** Narrows the project's skills for one thread; the next message starts with the new list. */
 export function ThreadSkillsControl(props: {
   readonly draftId?: DraftId | null;
+  readonly isLocalDraftThread: boolean;
   readonly environmentId: EnvironmentId;
   readonly thread: Pick<Thread, "id" | "projectId" | "skillSelection">;
   readonly instanceId: ProviderInstanceId;
   readonly catalog: ReadonlyArray<ServerProviderSkill>;
   readonly scanning: boolean;
+  readonly catalogReady: boolean;
+  readonly canOperate: boolean;
 }) {
   // Older servers ignore skill selections, so the control stays hidden there.
   const supported = useAtomValue(
@@ -39,6 +43,10 @@ export function ThreadSkillsControl(props: {
     props.thread.skillSelection?.instanceId === props.instanceId
       ? props.thread.skillSelection
       : null;
+  const { saving, save } = useSkillSelectionSave({
+    target: `${props.environmentId}:${props.thread.id}:${props.instanceId}`,
+    selection: threadSelection?.names,
+  });
   const { choices, selected } = resolveProviderSkillChoices({
     catalog: props.catalog,
     offered: projectSkills,
@@ -48,19 +56,27 @@ export function ThreadSkillsControl(props: {
     choices.length === 0
       ? "Skills"
       : describeSkillAllowlist({ selectedCount: selected.size, total: choices.length });
+  const localDraftId = props.isLocalDraftThread ? props.draftId : null;
   const setSelection = (names: ReadonlyArray<string> | null) => {
     const skillSelection = names === null ? null : { instanceId: props.instanceId, names };
-    if (props.draftId) {
-      useComposerDraftStore.getState().setDraftThreadContext(props.draftId, { skillSelection });
+    if (localDraftId) {
+      useComposerDraftStore.getState().setDraftThreadContext(localDraftId, { skillSelection });
       return;
     }
-    void setThreadSkills({
-      environmentId: props.environmentId,
-      input: {
-        threadId: props.thread.id,
-        skillSelection,
-      },
-    });
+    if (!props.canOperate) return;
+    void save(
+      names,
+      async () =>
+        (
+          await setThreadSkills({
+            environmentId: props.environmentId,
+            input: {
+              threadId: props.thread.id,
+              skillSelection,
+            },
+          })
+        )._tag === "Success",
+    );
   };
 
   if (!supported) return null;
@@ -70,6 +86,8 @@ export function ThreadSkillsControl(props: {
       choices={choices}
       selected={selected}
       scanning={props.scanning}
+      catalogReady={projectSkills !== undefined || props.catalogReady}
+      disabled={saving || (!localDraftId && !props.canOperate)}
       popupSide="top"
       popupProps={composerFloatingLayerProps}
       onChange={setSelection}

@@ -59,3 +59,36 @@ it("toggles, searches, clears, and resets a skill allowlist", async () => {
   await userEvent.click(screen.getByRole("button", { name: "Use project skills" }));
   expect(onReset).toHaveBeenCalledOnce();
 });
+
+it("waits for the cwd catalog before materializing All or row edits, while None and reset remain safe", async () => {
+  const onChange = vi.fn();
+  const onReset = vi.fn();
+  const picker = (ready: boolean) => (
+    <SkillAllowlistPicker
+      ariaLabel="Skills"
+      choices={choices}
+      selected={new Set(["pdf", "review"])}
+      trigger={<button type="button" />}
+      catalogReady={ready}
+      scanning={!ready}
+      onChange={onChange}
+      onReset={onReset}
+      resetLabel="Use project skills"
+    >
+      Skills
+    </SkillAllowlistPicker>
+  );
+  await using screen = await render(picker(false));
+  await userEvent.click(screen.getByRole("combobox", { name: "Skills" }));
+  await expect.element(screen.getByRole("button", { name: "All", exact: true })).toBeDisabled();
+  await expect
+    .element(screen.getByRole("option", { name: /deploy/ }))
+    .toHaveAttribute("aria-disabled", "true");
+  await userEvent.click(screen.getByRole("button", { name: "None", exact: true }));
+  expect(onChange).toHaveBeenLastCalledWith([]);
+  await userEvent.click(screen.getByRole("button", { name: "Use project skills" }));
+  expect(onReset).toHaveBeenCalledOnce();
+  await screen.rerender(picker(true));
+  await userEvent.click(screen.getByRole("button", { name: "All", exact: true }));
+  expect(onChange).toHaveBeenLastCalledWith(["deploy", "pdf", "review"]);
+});

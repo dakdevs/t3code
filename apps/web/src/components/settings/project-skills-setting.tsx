@@ -1,5 +1,6 @@
 import { useAtomValue } from "@effect/atom-react";
 import {
+  hasCompleteProviderWorkspaceSnapshot,
   resolveProviderSkillChoices,
   resolveProviderSkillsForCwd,
 } from "@t3tools/client-runtime/providerSkills";
@@ -14,6 +15,7 @@ import { useEnvironmentSettings, useUpdateEnvironmentSettings } from "../../hook
 import { serverEnvironment } from "../../state/server";
 import { useProviderWorkspaceSnapshotRefresh } from "../chat/useProviderWorkspaceSnapshotRefresh";
 import { describeSkillAllowlist, SkillAllowlistPicker } from "../skill-allowlist-picker";
+import { useSkillSelectionSave } from "../use-skill-selection-save";
 import { SelectButton } from "../ui/select";
 import { buildProviderSkillsOverridePatch } from "./ProviderSettingsPanel.logic";
 import { SettingResetButton, SettingsRow } from "./settingsLayout";
@@ -39,10 +41,17 @@ export function ProjectSkillsSetting(props: {
     instanceId: props.instanceId,
   });
   const representativeProjectId = props.projectIds[0];
-  if (!supported || representativeProjectId === undefined) return null;
-
   const projectSkills =
-    settings.projectSettingsOverrides[representativeProjectId]?.providerSkills?.[props.instanceId];
+    representativeProjectId === undefined
+      ? undefined
+      : settings.projectSettingsOverrides[representativeProjectId]?.providerSkills?.[
+          props.instanceId
+        ];
+  const { saving, save } = useSkillSelectionSave({
+    target: `${props.environmentId}:${props.projectIds.join(":")}:${props.instanceId}`,
+    selection: projectSkills,
+  });
+  if (!supported || representativeProjectId === undefined) return null;
   const { choices, selected } = resolveProviderSkillChoices({
     catalog: resolveProviderSkillsForCwd(props.provider, props.workspaceRoot),
     offered: undefined,
@@ -52,15 +61,26 @@ export function ProjectSkillsSetting(props: {
     projectSkills === undefined
       ? "Provider default"
       : describeSkillAllowlist({ selectedCount: selected.size, total: choices.length });
-  const write = (names: ReadonlyArray<string> | undefined) =>
-    updateSettings({
-      projectSettingsOverrides: buildProviderSkillsOverridePatch(
-        settings,
-        props.projectIds,
-        props.instanceId,
-        names,
-      ),
-    });
+  const write = (names: ReadonlyArray<string> | undefined) => {
+    if (!props.canWrite) return;
+    void save(
+      names,
+      () =>
+        new Promise<boolean>((resolve) =>
+          updateSettings(
+            {
+              projectSettingsOverrides: buildProviderSkillsOverridePatch(
+                settings,
+                props.projectIds,
+                props.instanceId,
+                names,
+              ),
+            },
+            { onSaved: () => resolve(true), onFailed: () => resolve(false) },
+          ),
+        ),
+    );
+  };
 
   return (
     <SettingsRow
@@ -71,7 +91,7 @@ export function ProjectSkillsSetting(props: {
           <SettingResetButton
             label="Available skills"
             tooltip="Reset to the provider default"
-            disabled={!props.canWrite}
+            disabled={!props.canWrite || saving}
             onClick={() => write(undefined)}
           />
         )
@@ -82,7 +102,8 @@ export function ProjectSkillsSetting(props: {
           choices={choices}
           selected={selected}
           scanning={scanning}
-          disabled={!props.canWrite}
+          catalogReady={hasCompleteProviderWorkspaceSnapshot(props.provider, props.workspaceRoot)}
+          disabled={!props.canWrite || saving}
           onChange={write}
           trigger={<SelectButton size="sm" />}
         >

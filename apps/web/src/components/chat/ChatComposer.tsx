@@ -243,6 +243,7 @@ import {
   type ComposerDispatchMode,
 } from "@t3tools/client-runtime/state/composer-dispatch";
 import {
+  hasCompleteProviderWorkspaceSnapshot,
   resolveProviderSkillsForCwd,
   resolveProviderSlashCommandsForCwd,
 } from "@t3tools/client-runtime/providerSkills";
@@ -346,6 +347,7 @@ export interface ChatComposerProps {
   routeKind: "server" | "draft";
   routeThreadRef: ScopedThreadRef;
   draftId: DraftId | null;
+  isLocalDraftThread: boolean;
   multipleModelSelections: ReadonlyArray<ModelSelection> | null;
   supportsMultipleModels: boolean;
   onMultipleModelSelectionsChange: React.Dispatch<
@@ -488,6 +490,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     composerDraftTarget,
     environmentId,
     canOperateThread,
+    isLocalDraftThread,
     attachmentUploadsCapabilityKnown,
     supportsAttachmentUploads,
     supportsQuestionAttachments,
@@ -2437,9 +2440,12 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
             environmentId={environmentId}
             thread={activeThread}
             draftId={draftId}
+            isLocalDraftThread={isLocalDraftThread}
+            canOperate={canOperateThread}
             instanceId={selectedInstanceId}
             catalog={selectedProviderSkills}
             scanning={workspaceSkillsScanning}
+            catalogReady={hasCompleteProviderWorkspaceSnapshot(selectedProviderStatus, gitCwd)}
           />
         ) : undefined
       }

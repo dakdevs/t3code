@@ -3,6 +3,7 @@ import { LegendList } from "@legendapp/list/react-native";
 import {
   createProviderWorkspaceSnapshotRefreshAtomFamily,
   isProviderWorkspaceSnapshotScanning,
+  hasCompleteProviderWorkspaceSnapshot,
   resolveProviderSkillChoices,
   resolveProviderSkillsForCwd,
 } from "@t3tools/client-runtime/providerSkills";
@@ -21,6 +22,8 @@ import { ScreenContent } from "../../components/ui/ScreenContent";
 import { ThemedSwitch } from "../../components/ui/ThemedSwitch";
 import { serverEnvironment } from "../../state/server";
 import { useAtomCommand } from "../../state/use-atom-command";
+import { NativeScrollView } from "../../native/NativeScrollViewMarker";
+import { useSkillSelectionSave } from "../skills/use-skill-selection-save";
 import type { SettingsTarget } from "./settings-environment-filter";
 
 const workspaceSnapshotRefresh = createProviderWorkspaceSnapshotRefreshAtomFamily({
@@ -61,18 +64,27 @@ export function ProjectSkillsSetting(props: {
     offered: undefined,
     selected: selectedNames,
   });
-  const write = (names: ReadonlyArray<string> | undefined) => {
-    const projectSettingsOverrides = buildProviderSkillsOverridePatch(
-      config.settings,
-      props.projectIds,
-      props.instanceId,
-      names,
-    );
-    void updateSettings({
-      environmentId: props.environment.environmentId,
-      input: { patch: { projectSettingsOverrides } },
-    });
-  };
+  const selectionSave = useSkillSelectionSave({
+    owner: JSON.stringify([props.environment.environmentId, props.projectIds, props.instanceId]),
+    selection: JSON.stringify(selectedNames ?? null),
+    save: async (names: ReadonlyArray<string> | undefined) => {
+      const projectSettingsOverrides = buildProviderSkillsOverridePatch(
+        config.settings,
+        props.projectIds,
+        props.instanceId,
+        names,
+      );
+      const result = await updateSettings({
+        environmentId: props.environment.environmentId,
+        input: { patch: { projectSettingsOverrides } },
+      });
+      return result._tag === "Success";
+    },
+  });
+  const { saving } = selectionSave;
+  const write = (names: ReadonlyArray<string> | undefined) =>
+    selectionSave.write(names, JSON.stringify(names ?? null));
+  const catalogReady = hasCompleteProviderWorkspaceSnapshot(provider, props.workspaceRoot);
   const scanning = isProviderWorkspaceSnapshotScanning(refreshState);
   const search: AppBarSearch = {
     value: query,
@@ -94,8 +106,8 @@ export function ProjectSkillsSetting(props: {
     <View className="flex-1 bg-sheet">
       <AppBar title="Project skills" onBack={props.onBack} hideBottomBorder search={search} />
       <ScreenContent>
-        {/* oxlint-disable-next-line t3code/require-registered-list-scroll -- Settings editor owns its list and header. */}
         <LegendList
+          renderScrollComponent={NativeScrollView}
           data={rows}
           keyExtractor={(choice) => choice.name}
           estimatedItemSize={56}
@@ -113,19 +125,19 @@ export function ProjectSkillsSetting(props: {
               </Text>
               <ListActionRow
                 label="Turn all on"
-                disabled={!canWrite || scanning}
-                onPress={() => write(choices.map((choice) => choice.name))}
+                disabled={!canWrite || saving || !catalogReady}
+                onPress={() => void write(choices.map((choice) => choice.name))}
               />
               <ListActionRow
                 label="Turn all off"
-                disabled={!canWrite || scanning}
-                onPress={() => write([])}
+                disabled={!canWrite || saving}
+                onPress={() => void write([])}
               />
               {selectedNames !== undefined ? (
                 <ListActionRow
                   label="Use provider default"
-                  disabled={!canWrite || scanning}
-                  onPress={() => write(undefined)}
+                  disabled={!canWrite || saving}
+                  onPress={() => void write(undefined)}
                 />
               ) : null}
             </View>
@@ -151,10 +163,10 @@ export function ProjectSkillsSetting(props: {
               </View>
               <ThemedSwitch
                 accessibilityLabel={item.name}
-                disabled={!canWrite || scanning}
+                disabled={!canWrite || saving || !catalogReady}
                 value={selected.has(item.name)}
                 onValueChange={(on) =>
-                  write(
+                  void write(
                     choices
                       .filter((choice) =>
                         choice.name === item.name ? on : selected.has(choice.name),

@@ -35,6 +35,7 @@ export function SkillAllowlistPicker(props: {
   readonly children: ComponentProps<typeof ComboboxTrigger>["children"];
   readonly disabled?: boolean;
   readonly scanning?: boolean;
+  readonly catalogReady?: boolean;
   readonly resetLabel?: string;
   readonly popupSide?: ComponentProps<typeof ComboboxPopup>["side"];
   readonly popupProps?: Record<`data-${string}`, string>;
@@ -69,7 +70,13 @@ export function SkillAllowlistPicker(props: {
   const renderItem = (name: string, index: number) => {
     const description = descriptions.get(name);
     return (
-      <ComboboxItem key={name} index={index} value={name} selectedFill={false}>
+      <ComboboxItem
+        key={name}
+        index={index}
+        value={name}
+        selectedFill={false}
+        disabled={props.disabled || props.catalogReady === false}
+      >
         <span className="flex w-full min-w-0 items-center justify-between gap-2">
           <span className="flex min-w-0 flex-col">
             <span className="truncate">{name}</span>
@@ -98,7 +105,9 @@ export function SkillAllowlistPicker(props: {
         if (nextOpen) setQuery("");
       }}
       value={value}
-      onValueChange={(next) => props.onChange(next)}
+      onValueChange={(next) => {
+        if (!props.disabled && props.catalogReady !== false) props.onChange(next);
+      }}
       onItemHighlighted={(_value, eventDetails) => {
         if (!open || eventDetails.index < 0 || eventDetails.reason !== "keyboard") return;
         void listRef.current?.scrollIndexIntoView?.({ index: eventDetails.index, animated: false });
@@ -124,15 +133,27 @@ export function SkillAllowlistPicker(props: {
           <Button
             size="xs"
             variant="ghost"
+            disabled={props.disabled || props.catalogReady === false}
             onClick={() => props.onChange(props.choices.map((choice) => choice.name))}
           >
             All
           </Button>
-          <Button size="xs" variant="ghost" onClick={() => props.onChange([])}>
+          <Button
+            size="xs"
+            variant="ghost"
+            disabled={props.disabled}
+            onClick={() => props.onChange([])}
+          >
             None
           </Button>
           {props.onReset && props.resetLabel ? (
-            <Button size="xs" variant="ghost" className="ms-auto" onClick={props.onReset}>
+            <Button
+              size="xs"
+              variant="ghost"
+              className="ms-auto"
+              disabled={props.disabled}
+              onClick={props.onReset}
+            >
               {props.resetLabel}
             </Button>
           ) : null}

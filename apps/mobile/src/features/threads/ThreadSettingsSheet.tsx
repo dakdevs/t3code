@@ -23,6 +23,7 @@ import type {
 } from "@t3tools/contracts";
 import { LegendList, type LegendListRenderItemProps } from "@legendapp/list/react-native";
 import {
+  hasCompleteProviderWorkspaceSnapshot,
   type ProviderSkillChoice,
   resolveProviderSkillChoices,
   resolveProviderSkillsForCwd,
@@ -80,6 +81,7 @@ import {
   rememberModelOptions,
   withRememberedModelOptions,
 } from "../../state/use-model-option-memory";
+import { useSkillSelectionSave } from "../skills/use-skill-selection-save";
 import { ChatGptSharingStatus } from "./ChatGptSharingStatus";
 import { environmentCatalog } from "../../connection/catalog";
 import { useEnvironmentQuery } from "../../state/query";
@@ -239,6 +241,7 @@ function SwitchRow(props: {
   readonly value: boolean;
   readonly onValueChange: (value: boolean) => void;
   readonly isLast?: boolean;
+  readonly disabled?: boolean;
 }) {
   return (
     <View
@@ -250,6 +253,7 @@ function SwitchRow(props: {
       <Text className="text-sm font-t3-medium text-foreground">{props.label}</Text>
       <ThemedSwitch
         accessibilityLabel={props.label}
+        disabled={props.disabled}
         onValueChange={props.onValueChange}
         value={props.value}
       />
@@ -267,6 +271,8 @@ type ThreadSettingsSkills = {
   readonly choices: ReadonlyArray<ProviderSkillChoice>;
   readonly selected: ReadonlySet<string>;
   readonly overridden: boolean;
+  readonly saving: boolean;
+  readonly catalogReady: boolean;
   readonly onChange: (names: ReadonlyArray<string> | null) => void;
 };
 
@@ -1339,11 +1345,24 @@ function ThreadSettingsSkillsScreen() {
     {
       id: "all",
       label: "Turn all on",
+      disabled: skills.saving || !skills.catalogReady,
       onPress: () => skills.onChange(skills.choices.map((c) => c.name)),
     },
-    { id: "none", label: "Turn all off", onPress: () => skills.onChange([]) },
+    {
+      id: "none",
+      label: "Turn all off",
+      disabled: skills.saving,
+      onPress: () => skills.onChange([]),
+    },
     ...(skills.overridden
-      ? [{ id: "inherit", label: "Use project skills", onPress: () => skills.onChange(null) }]
+      ? [
+          {
+            id: "inherit",
+            label: "Use project skills",
+            disabled: skills.saving,
+            onPress: () => skills.onChange(null),
+          },
+        ]
       : []),
   ];
 
@@ -1377,6 +1396,8 @@ function ThreadSettingsSkillsScreen() {
                     key={action.id}
                     accessibilityRole="button"
                     onPress={action.onPress}
+                    disabled={action.disabled}
+                    accessibilityState={{ disabled: action.disabled }}
                     className={cn(
                       "min-h-11 justify-center px-4 py-2 active:bg-subtle android:min-h-14",
                       index < actions.length - 1 && "border-b border-border-subtle",
@@ -1406,6 +1427,7 @@ function ThreadSettingsSkillsScreen() {
               <SwitchRow
                 label={item.name}
                 value={skills.selected.has(item.name)}
+                disabled={skills.saving || !skills.catalogReady}
                 onValueChange={(on) => toggle(item.name, on)}
                 isLast={index === rows.length - 1}
               />
@@ -1481,6 +1503,13 @@ export function ExistingThreadSettingsRouteScreen({
   const prompt = useComposerDraft(draftKey).text;
   const setThreadSkills = useAtomCommand(threadEnvironment.setSkills, "thread skills update");
 
+  const skillSave = useSkillSelectionSave({
+    owner: threadKey,
+    selection: JSON.stringify(selectedThread?.skillSelection ?? null),
+    save: async (value: Parameters<typeof setThreadSkills>[0]) =>
+      (await setThreadSkills(value))._tag === "Success",
+  });
+
   if (!selectedThread) {
     return <View className="flex-1 bg-sheet" />;
   }
@@ -1539,14 +1568,21 @@ export function ExistingThreadSettingsRouteScreen({
                 ? "All"
                 : `${skillChoices.selected.size} of ${skillChoices.choices.length}`,
           overridden: threadSkillSelection !== null,
+          saving: skillSave.saving,
+          catalogReady:
+            projectSkills !== undefined ||
+            hasCompleteProviderWorkspaceSnapshot(skillsProvider, skillsCwd),
           onChange: (names: ReadonlyArray<string> | null) =>
-            void setThreadSkills({
-              environmentId: thread.environmentId,
-              input: {
-                threadId: thread.id,
-                skillSelection: names === null ? null : { instanceId, names },
+            void skillSave.write(
+              {
+                environmentId: thread.environmentId,
+                input: {
+                  threadId: thread.id,
+                  skillSelection: names === null ? null : { instanceId, names },
+                },
               },
-            }),
+              JSON.stringify(names === null ? null : { instanceId, names }),
+            ),
         }
       : undefined;
   };
@@ -1601,22 +1637,24 @@ export function NewTaskThreadSettingsRouteScreen() {
     )
       return undefined;
     const selection = flow.skillSelection?.instanceId === instanceId ? flow.skillSelection : null;
+    const cwd = flow.selectedWorktreePath ?? flow.selectedProject?.workspaceRoot ?? null;
+    const projectSkills = flow.selectedProject
+      ? config.settings.projectSettingsOverrides[flow.selectedProject.id]?.providerSkills?.[
+          instanceId
+        ]
+      : undefined;
     const choices = resolveProviderSkillChoices({
-      catalog: resolveProviderSkillsForCwd(
-        provider,
-        flow.selectedWorktreePath ?? flow.selectedProject?.workspaceRoot ?? null,
-      ),
-      offered: flow.selectedProject
-        ? config.settings.projectSettingsOverrides[flow.selectedProject.id]?.providerSkills?.[
-            instanceId
-          ]
-        : undefined,
+      catalog: resolveProviderSkillsForCwd(provider, cwd),
+      offered: projectSkills,
       selected: selection?.names,
     });
     return {
       ...choices,
       label: `${choices.selected.size} of ${choices.choices.length}`,
       overridden: selection !== null,
+      saving: false,
+      catalogReady:
+        projectSkills !== undefined || hasCompleteProviderWorkspaceSnapshot(provider, cwd),
       onChange: (names) => flow.setSkillSelection(names === null ? null : { instanceId, names }),
     };
   };

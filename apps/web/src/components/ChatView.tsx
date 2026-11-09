@@ -3565,6 +3565,7 @@ export default function ChatView(props: ChatViewProps) {
                                 onMultipleModelSelectionsChange={setMultipleModelSelectionsStable}
                                 composerRef={composerRef}
                                 composerDraftTarget={composerDraftTarget}
+                                isLocalDraftThread={isLocalDraftThread}
                                 environmentId={environmentId}
                                 attachmentUploadsCapabilityKnown={attachmentUploadsCapabilityKnown}
                                 supportsAttachmentUploads={supportsAttachmentUploads}
